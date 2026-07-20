@@ -77,7 +77,9 @@ export async function POST(req: NextRequest) {
       ...(history ?? []).map(
         ({ role, content }: { role: string; content: string }) => ({
           role: role as 'user' | 'assistant' | 'system',
-          content,
+          // Both Anthropic and OpenAI reject empty-string content. This happens
+          // when an assistant turn produced only edit blocks with no prose.
+          content: content || '✦',
         })
       ),
       { role: 'user' as const, content: message },

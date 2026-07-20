@@ -10,10 +10,9 @@ import {
   CopyIcon,
   EraserIcon,
   PaperPlaneTiltIcon,
-  XIcon,
 } from '@phosphor-icons/react';
 import ReactMarkdown from 'react-markdown';
-import { parseSuggestion } from '@/lib/prompts';
+import { parseSuggestion, type Edit } from '@/lib/prompts';
 import { loadSelectedModel, saveSelectedModel } from '@/lib/ai';
 
 interface ModelOption {
@@ -38,25 +37,17 @@ const FREE_TIER_PROVIDERS = new Set(['openrouter', 'groq']);
 // Types
 // ---------------------------------------------------------------------------
 
-type EditStatus = 'pending' | 'applied' | 'dismissed';
-
-interface Edit {
-  search: string;
-  replace: string;
-  status: EditStatus;
-}
-
 interface Message {
   role: 'user' | 'assistant';
   prose: string;
-  edits: Edit[];
+  editCount: number;
   fullResume?: string;
-  model?: string; // model that generated this message (for tracking)
+  model?: string;
 }
 
 interface AIChatProps {
   resumeContent: string;
-  onApplyEdit?: (search: string, replace: string) => void;
+  onEditsReceived?: (edits: Edit[], model?: string) => void;
   onReplaceResume?: (content: string) => void;
   isGuest?: boolean;
   expanded?: boolean;
@@ -68,7 +59,7 @@ interface AIChatProps {
 
 export default function AIChat({
   resumeContent,
-  onApplyEdit,
+  onEditsReceived,
   onReplaceResume,
   isGuest = false,
   expanded = false,
@@ -168,97 +159,6 @@ export default function AIChat({
     prevLoadingRef.current = loading;
   }, [loading]);
 
-  const updateEditStatus = (
-    msgIdx: number,
-    editIdx: number,
-    status: EditStatus
-  ) => {
-    setMessages((prev) =>
-      prev.map((m, mi) =>
-        mi !== msgIdx
-          ? m
-          : {
-              ...m,
-              edits: m.edits.map((e, ei) =>
-                ei === editIdx ? { ...e, status } : e
-              ),
-            }
-      )
-    );
-  };
-
-  // Fire-and-forget suggestion tracking
-  const trackSuggestion = (
-    action: 'accepted' | 'rejected',
-    count: number,
-    model?: string
-  ) => {
-    fetch('/api/ai/track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, count, model }),
-    }).catch(() => {});
-  };
-
-  const handleApply = (msgIdx: number, editIdx: number) => {
-    const edit = messages[msgIdx]?.edits[editIdx];
-    if (!edit || edit.status !== 'pending') return;
-    onApplyEdit?.(edit.search, edit.replace);
-    updateEditStatus(msgIdx, editIdx, 'applied');
-    trackSuggestion('accepted', 1, messages[msgIdx]?.model);
-  };
-
-  const handleDismiss = (msgIdx: number, editIdx: number) => {
-    if (messages[msgIdx]?.edits[editIdx]?.status !== 'pending') return;
-    updateEditStatus(msgIdx, editIdx, 'dismissed');
-    trackSuggestion('rejected', 1, messages[msgIdx]?.model);
-  };
-
-  const handleApplyAll = (msgIdx: number) => {
-    const msg = messages[msgIdx];
-    if (!msg) return;
-    const pending = msg.edits.filter((e) => e.status === 'pending');
-    pending.forEach((edit) => onApplyEdit?.(edit.search, edit.replace));
-    setMessages((prev) =>
-      prev.map((m, mi) =>
-        mi !== msgIdx
-          ? m
-          : {
-              ...m,
-              edits: m.edits.map((e) =>
-                e.status === 'pending'
-                  ? { ...e, status: 'applied' as EditStatus }
-                  : e
-              ),
-            }
-      )
-    );
-    if (pending.length > 0)
-      trackSuggestion('accepted', pending.length, msg.model);
-  };
-
-  const handleDismissAll = (msgIdx: number) => {
-    const msg = messages[msgIdx];
-    if (!msg) return;
-    const pending = msg.edits.filter((e) => e.status === 'pending');
-    setMessages((prev) =>
-      prev.map((m, mi) =>
-        mi !== msgIdx
-          ? m
-          : {
-              ...m,
-              edits: m.edits.map((e) =>
-                e.status === 'pending'
-                  ? { ...e, status: 'dismissed' as EditStatus }
-                  : e
-              ),
-            }
-      )
-    );
-    if (pending.length > 0)
-      trackSuggestion('rejected', pending.length, msg.model);
-  };
-
   const handleCopy = (text: string, idx: number) => {
     navigator.clipboard.writeText(text);
     setCopiedIdx(idx);
@@ -274,7 +174,7 @@ export default function AIChat({
     if (!text || loading) return;
 
     const history = historyOverride ?? messages;
-    const userMsg: Message = { role: 'user', prose: text, edits: [] };
+    const userMsg: Message = { role: 'user', prose: text, editCount: 0 };
     const next = [...history, userMsg];
     setMessages(next);
     if (!overrideText) setInput('');
@@ -287,8 +187,13 @@ export default function AIChat({
         body: JSON.stringify({
           message: text,
           resumeContent,
-          // Send only prose for history — the full resume is always in the preamble
-          history: history.map((m) => ({ role: m.role, content: m.prose })),
+          // Send only prose for history — the full resume is always in the preamble.
+          // Replace empty prose (edit-only turns) with a placeholder so providers
+          // don't reject empty-string content.
+          history: history.map((m) => ({
+            role: m.role,
+            content: m.prose || '✦',
+          })),
           model: selectedModelId || undefined,
           providerId: selectedProviderId || undefined,
         }),
@@ -301,7 +206,7 @@ export default function AIChat({
           {
             role: 'assistant',
             prose: `Slow down — try again${after ? ` in ${after}s` : ' in a moment'}.`,
-            edits: [],
+            editCount: 0,
           },
         ]);
         return;
@@ -310,15 +215,15 @@ export default function AIChat({
       const data = await res.json();
       if (data.reply) {
         const { prose, edits, fullResume } = parseSuggestion(data.reply);
+        if (edits.length > 0) {
+          onEditsReceived?.(edits, selectedModelId || undefined);
+        }
         setMessages([
           ...next,
           {
             role: 'assistant',
             prose,
-            edits: edits.map((e) => ({
-              ...e,
-              status: 'pending' as EditStatus,
-            })),
+            editCount: edits.length,
             fullResume,
             model: selectedModelId || undefined,
           },
@@ -329,7 +234,7 @@ export default function AIChat({
           {
             role: 'assistant',
             prose: 'Something went wrong. Please try another model.',
-            edits: [],
+            editCount: 0,
           },
         ]);
       }
@@ -339,7 +244,7 @@ export default function AIChat({
         {
           role: 'assistant',
           prose: 'Failed to reach the AI. Check your connection.',
-          edits: [],
+          editCount: 0,
         },
       ]);
     } finally {
@@ -479,6 +384,18 @@ export default function AIChat({
                 />
               )}
 
+              {msg.role === 'assistant' && msg.editCount > 0 && (
+                <div className="flex items-center gap-1.5 text-[11px] text-faint">
+                  <span className="text-accent" aria-hidden>
+                    ✦
+                  </span>
+                  <span>
+                    {msg.editCount} edit{msg.editCount !== 1 ? 's' : ''} shown
+                    in editor
+                  </span>
+                </div>
+              )}
+
               {msg.role === 'user' && (
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                   <button
@@ -499,37 +416,6 @@ export default function AIChat({
                     title="Retry"
                   >
                     <ArrowCounterClockwiseIcon size={11} />
-                  </button>
-                </div>
-              )}
-
-              {msg.edits.map((edit, ei) =>
-                edit.status === 'dismissed' ? null : (
-                  <SuggestionCard
-                    key={ei}
-                    edit={edit}
-                    onApply={() => handleApply(mi, ei)}
-                    onDismiss={() => handleDismiss(mi, ei)}
-                  />
-                )
-              )}
-
-              {msg.edits.filter((e) => e.status === 'pending').length > 1 && (
-                <div className="self-start flex items-center gap-2">
-                  <button
-                    onClick={() => handleApplyAll(mi)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-accent text-accent-text rounded-lg hover:opacity-90 transition-opacity duration-150"
-                  >
-                    <CheckIcon size={12} weight="bold" />
-                    Apply all (
-                    {msg.edits.filter((e) => e.status === 'pending').length})
-                  </button>
-                  <button
-                    onClick={() => handleDismissAll(mi)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted hover:text-text bg-surface hover:bg-surface-2 border border-border rounded-lg transition-colors duration-150"
-                  >
-                    <XIcon size={12} />
-                    Dismiss all
                   </button>
                 </div>
               )}
@@ -836,79 +722,6 @@ function FullResumeCard({
             <CheckIcon size={11} weight="bold" />
             Replace resume
           </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Suggestion card
-// ---------------------------------------------------------------------------
-
-interface SuggestionCardProps {
-  edit: Edit;
-  onApply: () => void;
-  onDismiss: () => void;
-}
-
-function SuggestionCard({ edit, onApply, onDismiss }: SuggestionCardProps) {
-  return (
-    <div className="w-full max-w-[95%] rounded-xl border border-border bg-surface overflow-hidden text-xs">
-      {/* Header */}
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border">
-        <span className="text-accent select-none" aria-hidden>
-          ✦
-        </span>
-        <span className="font-medium text-text">
-          {edit.status === 'applied' ? 'Applied' : 'Suggested edit'}
-        </span>
-      </div>
-
-      {/* Diff */}
-      <div className="flex flex-col divide-y divide-border">
-        <div className="px-3 py-2">
-          <div className="text-[10px] uppercase tracking-wide text-faint mb-1.5">
-            Before
-          </div>
-          <pre className="whitespace-pre-wrap font-mono text-[11px] text-muted leading-relaxed">
-            {edit.search}
-          </pre>
-        </div>
-        <div className="px-3 py-2 bg-accent-muted">
-          <div className="text-[10px] uppercase tracking-wide text-accent mb-1.5">
-            After
-          </div>
-          <pre className="whitespace-pre-wrap font-mono text-[11px] text-text leading-relaxed">
-            {edit.replace}
-          </pre>
-        </div>
-      </div>
-
-      {/* Actions */}
-      {edit.status === 'pending' && (
-        <div className="flex justify-end gap-2 px-3 py-2 border-t border-border">
-          <button
-            onClick={onDismiss}
-            className="flex items-center gap-1 px-2 py-1 text-muted hover:text-text rounded-md hover:bg-surface-2 transition-colors duration-150"
-          >
-            <XIcon size={11} />
-            Dismiss
-          </button>
-          <button
-            onClick={onApply}
-            className="flex items-center gap-1 px-2.5 py-1 bg-accent text-accent-text rounded-md hover:opacity-90 transition-opacity duration-150"
-          >
-            <CheckIcon size={11} weight="bold" />
-            Apply
-          </button>
-        </div>
-      )}
-
-      {edit.status === 'applied' && (
-        <div className="flex items-center gap-1.5 px-3 py-2 border-t border-border text-accent">
-          <CheckIcon size={11} weight="bold" />
-          <span>Applied to resume</span>
         </div>
       )}
     </div>

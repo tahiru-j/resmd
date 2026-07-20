@@ -19,6 +19,9 @@ import ErrorBoundary from '@/components/editor/ErrorBoundary';
 import GuestBanner from '@/components/editor/GuestBanner';
 import CloneModal from '@/components/variants/CloneModal';
 import type { Resume } from '@/types/resume';
+import type { PendingEdit } from '@/types/pendingEdit';
+import type { Edit } from '@/lib/prompts';
+import { trackSuggestion } from '@/lib/ai';
 
 // CodeMirror is browser-only
 const Editor = dynamic(() => import('@/components/editor/Editor'), {
@@ -66,6 +69,8 @@ export default function EditorClient({
   // Track active resume ID independently so autosave targets the right record
   const activeResumeIdRef = useRef(resume.id);
   const [activeResumeId, setActiveResumeId] = useState(resume.id);
+
+  const [pendingEdits, setPendingEdits] = useState<PendingEdit[]>([]);
 
   const [jumpTarget, setJumpTarget] = useState<{
     word: string;
@@ -241,6 +246,43 @@ export default function EditorClient({
     },
     [scheduleAutosave]
   );
+
+  const handleEditsReceived = useCallback((edits: Edit[], model?: string) => {
+    const newEdits: PendingEdit[] = edits.map((e) => ({
+      id: crypto.randomUUID(),
+      search: e.search,
+      replace: e.replace,
+      status: 'pending',
+      model,
+    }));
+    setPendingEdits((prev) => [...prev, ...newEdits]);
+  }, []);
+
+  const handleAcceptEdit = useCallback(
+    (id: string) => {
+      setPendingEdits((prev) => {
+        const edit = prev.find((e) => e.id === id);
+        if (!edit || edit.status !== 'pending') return prev;
+        handleApplyEdit(edit.search, edit.replace);
+        trackSuggestion('accepted', 1, edit.model);
+        return prev.map((e) =>
+          e.id === id ? { ...e, status: 'applied' as const } : e
+        );
+      });
+    },
+    [handleApplyEdit]
+  );
+
+  const handleRejectEdit = useCallback((id: string) => {
+    setPendingEdits((prev) => {
+      const edit = prev.find((e) => e.id === id);
+      if (!edit || edit.status !== 'pending') return prev;
+      trackSuggestion('rejected', 1, edit.model);
+      return prev.map((e) =>
+        e.id === id ? { ...e, status: 'dismissed' as const } : e
+      );
+    });
+  }, []);
 
   const handleReplaceResume = useCallback(
     (content: string) => {
@@ -495,12 +537,15 @@ export default function EditorClient({
                   onJumpComplete={() => setJumpTarget(null)}
                   resumeContext={rawContent}
                   onEnhance={handleApplyEdit}
+                  pendingEdits={pendingEdits}
+                  onAcceptEdit={handleAcceptEdit}
+                  onRejectEdit={handleRejectEdit}
                 />
               )}
             </div>
             <AIChat
               resumeContent={rawContent}
-              onApplyEdit={handleApplyEdit}
+              onEditsReceived={handleEditsReceived}
               onReplaceResume={handleReplaceResume}
               isGuest={isGuest}
             />
@@ -552,12 +597,15 @@ export default function EditorClient({
                     onJumpComplete={() => setJumpTarget(null)}
                     resumeContext={rawContent}
                     onEnhance={handleApplyEdit}
+                    pendingEdits={pendingEdits}
+                    onAcceptEdit={handleAcceptEdit}
+                    onRejectEdit={handleRejectEdit}
                   />
                 )}
               </div>
               <AIChat
                 resumeContent={rawContent}
-                onApplyEdit={handleApplyEdit}
+                onEditsReceived={handleEditsReceived}
                 onReplaceResume={handleReplaceResume}
                 isGuest={isGuest}
               />

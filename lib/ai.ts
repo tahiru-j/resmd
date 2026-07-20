@@ -39,6 +39,18 @@ export function saveSelectedModel(model: SelectedModel): void {
   localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, JSON.stringify(model));
 }
 
+export function trackSuggestion(
+  action: 'accepted' | 'rejected',
+  count: number,
+  model?: string
+) {
+  fetch('/api/ai/track', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, count, model }),
+  }).catch(() => {});
+}
+
 export interface EnhanceOptions {
   instruction: string;
   selectedText: string;

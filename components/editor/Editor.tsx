@@ -14,6 +14,13 @@ import { markdown } from '@codemirror/lang-markdown';
 import { history, defaultKeymap, historyKeymap } from '@codemirror/commands';
 import { SparkleIcon } from '@phosphor-icons/react';
 import EnhanceInput from '@/components/editor/EnhanceInput';
+import {
+  diffEditsField,
+  makeDiffDecorationsField,
+  setDiffEdits,
+  type DiffCallbacks,
+} from '@/components/editor/diffExtension';
+import type { PendingEdit } from '@/types/pendingEdit';
 
 interface EditorProps {
   value: string;
@@ -22,6 +29,9 @@ interface EditorProps {
   onJumpComplete?: () => void;
   resumeContext?: string;
   onEnhance?: (selectedText: string, replacement: string) => void;
+  pendingEdits?: PendingEdit[];
+  onAcceptEdit?: (id: string) => void;
+  onRejectEdit?: (id: string) => void;
 }
 
 // ─── Format helpers (module-level, pure functions on EditorView) ─────────────
@@ -258,16 +268,27 @@ export default function Editor({
   onJumpComplete,
   resumeContext = '',
   onEnhance,
+  pendingEdits,
+  onAcceptEdit,
+  onRejectEdit,
 }: EditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const onEnhanceRef = useRef(onEnhance);
+  const onAcceptEditRef = useRef(onAcceptEdit);
+  const onRejectEditRef = useRef(onRejectEdit);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fontSizeRef = useRef(DEFAULT_FONT_SIZE);
   const themeCompartment = useRef(new Compartment());
+  const diffCompartment = useRef(new Compartment());
   const zoomPillTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rafRef = useRef<number | null>(null);
+
+  const diffCallbacksRef = useRef<DiffCallbacks>({
+    onAccept: (id) => onAcceptEditRef.current?.(id),
+    onReject: (id) => onRejectEditRef.current?.(id),
+  });
 
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
   const [showZoomPill, setShowZoomPill] = useState(false);
@@ -280,6 +301,8 @@ export default function Editor({
 
   onChangeRef.current = onChange;
   onEnhanceRef.current = onEnhance;
+  onAcceptEditRef.current = onAcceptEdit;
+  onRejectEditRef.current = onRejectEdit;
 
   // Handle AI enhance
   const handleEnhance = useCallback(
@@ -323,6 +346,15 @@ export default function Editor({
     }
     onJumpComplete?.();
   }, [jumpTarget, onJumpComplete]);
+
+  // Sync pending edits → CodeMirror inline diff decorations
+  useEffect(() => {
+    if (!viewRef.current) return;
+    const active = (pendingEdits ?? [])
+      .filter((e) => e.status === 'pending')
+      .map(({ id, search, replace }) => ({ id, search, replace }));
+    viewRef.current.dispatch({ effects: setDiffEdits.of(active) });
+  }, [pendingEdits]);
 
   const changeZoomRef = useRef((delta: number) => {
     const next = Math.max(10, Math.min(24, fontSizeRef.current + delta));
@@ -442,6 +474,10 @@ export default function Editor({
           markdown(),
           EditorView.lineWrapping,
           resMarkupHighlight,
+          diffEditsField,
+          diffCompartment.current.of(
+            makeDiffDecorationsField(diffCallbacksRef)
+          ),
           themeCompartment.current.of(makeTheme(fontSizeRef.current)),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
