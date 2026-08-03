@@ -9,7 +9,10 @@ import {
   CheckIcon,
   CopyIcon,
   EraserIcon,
+  PaperclipIcon,
   PaperPlaneTiltIcon,
+  SpinnerIcon,
+  XIcon,
 } from '@phosphor-icons/react';
 import ReactMarkdown from 'react-markdown';
 import { parseSuggestion, type Edit } from '@/lib/prompts';
@@ -43,6 +46,12 @@ interface Message {
   editCount: number;
   fullResume?: string;
   model?: string;
+  attachmentName?: string;
+}
+
+interface AttachedFile {
+  name: string;
+  text: string;
 }
 
 interface AIChatProps {
@@ -76,10 +85,16 @@ export default function AIChat({
   const [collapsedProviders, setCollapsedProviders] = useState<Set<string>>(
     new Set()
   );
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
+  const [attachLoading, setAttachLoading] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const pickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachChoiceRef = useRef<HTMLDivElement>(null);
 
   // Load persisted model selection and fetch available models
   useEffect(() => {
@@ -137,11 +152,82 @@ export default function AIChat({
     return () => document.removeEventListener('mousedown', handler);
   }, [showModelPicker]);
 
+  // Close attach choice on outside click
+  useEffect(() => {
+    if (!pendingFile) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        attachChoiceRef.current &&
+        !attachChoiceRef.current.contains(e.target as Node) &&
+        fileInputRef.current &&
+        !fileInputRef.current.contains(e.target as Node)
+      ) {
+        setPendingFile(null);
+        setAttachError(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [pendingFile]);
+
   const handleModelChange = (id: string, provId: string) => {
     setSelectedModelId(id);
     setSelectedProviderId(provId);
     saveSelectedModel({ modelId: id, providerId: provId });
     setShowModelPicker(false);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPendingFile(file);
+    setAttachError(null);
+    // Reset so same file can be re-selected if dismissed
+    e.target.value = '';
+  };
+
+  const handleConvertToResmd = async () => {
+    if (!pendingFile) return;
+    setAttachLoading(true);
+    setAttachError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', pendingFile);
+      const res = await fetch('/api/import', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Import failed');
+      onReplaceResume?.(data.rawContent);
+      setPendingFile(null);
+    } catch (err) {
+      setAttachError(err instanceof Error ? err.message : 'Failed to import');
+    } finally {
+      setAttachLoading(false);
+    }
+  };
+
+  const handleAddAsContext = async () => {
+    if (!pendingFile) return;
+    setAttachLoading(true);
+    setAttachError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', pendingFile);
+      const res = await fetch('/api/import/extract', {
+        method: 'POST',
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Extraction failed');
+      setAttachedFile({ name: pendingFile.name, text: data.text });
+      setPendingFile(null);
+      inputRef.current?.focus();
+    } catch (err) {
+      setAttachError(
+        err instanceof Error ? err.message : 'Failed to read file'
+      );
+    } finally {
+      setAttachLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -174,7 +260,16 @@ export default function AIChat({
     if (!text || loading) return;
 
     const history = historyOverride ?? messages;
-    const userMsg: Message = { role: 'user', prose: text, editCount: 0 };
+    // Capture and clear attached file before the async send
+    const currentAttachment = attachedFile;
+    if (currentAttachment) setAttachedFile(null);
+
+    const userMsg: Message = {
+      role: 'user',
+      prose: text,
+      editCount: 0,
+      attachmentName: currentAttachment?.name,
+    };
     const next = [...history, userMsg];
     setMessages(next);
     if (!overrideText) setInput('');
@@ -196,6 +291,12 @@ export default function AIChat({
           })),
           model: selectedModelId || undefined,
           providerId: selectedProviderId || undefined,
+          ...(currentAttachment
+            ? {
+                fileContext: currentAttachment.text,
+                fileName: currentAttachment.name,
+              }
+            : {}),
         }),
       });
 
@@ -307,6 +408,16 @@ export default function AIChat({
       className={`flex flex-col border-t border-border bg-editor-bg ${expanded ? 'flex-1 min-h-0' : 'flex-shrink-0'}`}
       onClick={handleContainerClick}
     >
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,.docx,.txt,.md"
+        className="hidden"
+        onChange={handleFileSelect}
+      />
+
+      {/* Message history */}
       {messages.length > 0 && (
         <div
           ref={historyRef}
@@ -327,7 +438,15 @@ export default function AIChat({
                   }`}
                 >
                   {msg.role === 'user' ? (
-                    msg.prose
+                    <span>
+                      {msg.prose}
+                      {msg.attachmentName && (
+                        <span className="flex items-center gap-1 mt-1.5 text-[10px] text-accent-text/70">
+                          <PaperclipIcon size={9} />
+                          {msg.attachmentName}
+                        </span>
+                      )}
+                    </span>
                   ) : (
                     <ReactMarkdown
                       components={{
@@ -432,243 +551,354 @@ export default function AIChat({
         </div>
       )}
 
-      {/* Input row */}
-      <div className="flex items-end gap-2 px-3 py-2.5 sm:py-2">
-        <span
-          className="text-accent select-none text-sm flex-shrink-0 pb-1"
-          aria-hidden
+      {/* Input card */}
+      <div className="px-3 pb-3 pt-1.5">
+        <div
+          className={`relative rounded-2xl border bg-surface transition-colors duration-150 ${
+            pendingFile
+              ? 'border-accent/50'
+              : 'border-border focus-within:border-accent/30'
+          }`}
         >
-          ✦
-        </span>
-
-        <textarea
-          ref={inputRef}
-          rows={1}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onInput={handleInput}
-          placeholder={
-            messages.length === 0 ? 'Ask AI to improve your resume…' : ''
-          }
-          disabled={loading}
-          className="flex-1 bg-transparent text-sm text-text placeholder:text-faint outline-none disabled:opacity-50 resize-none overflow-y-auto max-h-36 leading-5 pb-1"
-        />
-
-        {/* Bubbles + send — right side */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {/* Model picker bubble */}
-          <div className="relative">
-            {showModelPicker && (
-              <div
-                ref={pickerRef}
-                className="absolute bottom-full mb-2 right-0 w-72 bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden z-50"
-              >
-                {/* Header */}
-                <div className="px-3 py-2.5 border-b border-border flex items-center justify-between">
-                  <span className="text-xs font-semibold text-text">
-                    Select model
-                  </span>
-                  <a
-                    href="/settings"
-                    className="text-[10px] text-accent hover:underline"
-                  >
-                    + Add provider
-                  </a>
+          {/* Attach choice popover */}
+          {pendingFile && (
+            <div
+              ref={attachChoiceRef}
+              className="absolute bottom-full left-0 mb-2 w-72 bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden z-50"
+            >
+              <div className="px-3 py-2.5 border-b border-border flex items-center gap-2">
+                <PaperclipIcon size={12} className="text-muted flex-shrink-0" />
+                <span className="text-xs font-medium text-text truncate flex-1">
+                  {pendingFile.name}
+                </span>
+                <button
+                  onClick={() => {
+                    setPendingFile(null);
+                    setAttachError(null);
+                  }}
+                  className="text-faint hover:text-text transition-colors flex-shrink-0"
+                >
+                  <XIcon size={12} weight="bold" />
+                </button>
+              </div>
+              {attachError ? (
+                <div className="px-3 py-3 text-xs text-red-400">
+                  {attachError}
                 </div>
+              ) : (
+                <div className="p-2 flex flex-col gap-1.5">
+                  <button
+                    onClick={handleConvertToResmd}
+                    disabled={attachLoading}
+                    className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-100 flex items-start gap-2.5"
+                  >
+                    <span className="text-accent mt-0.5 flex-shrink-0">✦</span>
+                    <div>
+                      <div className="text-xs font-medium text-text">
+                        Convert to resmd
+                      </div>
+                      <div className="text-[11px] text-muted mt-0.5">
+                        Replace the editor content with an AI-converted version
+                      </div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={handleAddAsContext}
+                    disabled={attachLoading}
+                    className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-100 flex items-start gap-2.5"
+                  >
+                    <PaperclipIcon
+                      size={13}
+                      className="text-muted mt-0.5 flex-shrink-0"
+                    />
+                    <div>
+                      <div className="text-xs font-medium text-text">
+                        Add as AI context
+                      </div>
+                      <div className="text-[11px] text-muted mt-0.5">
+                        Let the AI read this file when answering your next
+                        message
+                      </div>
+                    </div>
+                  </button>
+                  {attachLoading && (
+                    <div className="flex items-center justify-center py-2 gap-2 text-xs text-muted">
+                      <SpinnerIcon size={12} className="animate-spin" />
+                      Processing…
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
-                {models.length === 0 ? (
-                  <p className="text-xs text-faint text-center py-6 px-4">
-                    No models —{' '}
-                    <a href="/settings" className="text-accent hover:underline">
-                      add a provider
-                    </a>
-                  </p>
-                ) : (
-                  (() => {
-                    // BYOK models first, then server models
-                    const byok = models.filter(
-                      (m) => m.providerId !== 'server'
-                    );
-                    const server = models.filter(
-                      (m) => m.providerId === 'server'
-                    );
-                    const ordered = [...byok, ...server];
+          {/* Attached file chip — inside card */}
+          {attachedFile && (
+            <div className="flex items-center gap-2 px-3 pt-2.5">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/10 border border-accent/20 text-xs text-accent min-w-0">
+                <PaperclipIcon size={11} className="flex-shrink-0" />
+                <span className="truncate max-w-[200px]">
+                  {attachedFile.name}
+                </span>
+                <button
+                  onClick={() => setAttachedFile(null)}
+                  className="flex-shrink-0 text-accent/60 hover:text-accent transition-colors ml-0.5"
+                  title="Remove"
+                >
+                  <XIcon size={10} weight="bold" />
+                </button>
+              </div>
+            </div>
+          )}
 
-                    // Group by provider
-                    const groups = new Map<string, ModelOption[]>();
-                    for (const m of ordered) {
-                      if (!groups.has(m.provider)) groups.set(m.provider, []);
-                      groups.get(m.provider)!.push(m);
-                    }
+          {/* Textarea */}
+          <textarea
+            ref={inputRef}
+            rows={1}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onInput={handleInput}
+            placeholder="Ask AI to improve your resume…"
+            disabled={loading}
+            className="w-full bg-transparent text-sm text-text placeholder:text-faint outline-none disabled:opacity-50 resize-none overflow-y-auto leading-5 px-4 pt-3 pb-2 max-h-48 min-h-[2.75rem]"
+          />
 
-                    return (
-                      <div
-                        className="overflow-y-auto"
-                        style={{ maxHeight: '320px' }}
+          {/* Bottom toolbar */}
+          <div className="flex items-center justify-between px-2 pb-2 pt-0.5">
+            {/* Left: attach + model + clear */}
+            <div className="flex items-center gap-0.5">
+              {/* Attach */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={loading}
+                title="Attach file (.pdf .docx .txt .md)"
+                className={`p-2 rounded-xl transition-colors duration-150 disabled:opacity-30 disabled:cursor-not-allowed ${
+                  attachedFile
+                    ? 'text-accent bg-accent/10 hover:bg-accent/20'
+                    : 'text-muted hover:text-text hover:bg-surface-2'
+                }`}
+              >
+                <PaperclipIcon size={15} />
+              </button>
+
+              {/* Model picker */}
+              <div className="relative">
+                {showModelPicker && (
+                  <div
+                    ref={pickerRef}
+                    className="absolute bottom-full mb-2 left-0 w-72 bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden z-50"
+                  >
+                    <div className="px-3 py-2.5 border-b border-border flex items-center justify-between">
+                      <span className="text-xs font-semibold text-text">
+                        Select model
+                      </span>
+                      <a
+                        href="/settings"
+                        className="text-[10px] text-accent hover:underline"
                       >
-                        {Array.from(groups.entries()).map(
-                          ([providerName, providerModels], gi) => {
-                            const isCollapsed =
-                              collapsedProviders.has(providerName);
-                            const hasActive = providerModels.some(
-                              (m) =>
-                                m.id === selectedModelId &&
-                                m.providerId === selectedProviderId
-                            );
-                            return (
-                              <div key={providerName}>
-                                {/* Provider section header — clickable to collapse */}
-                                <button
-                                  onClick={() =>
-                                    setCollapsedProviders((prev) => {
-                                      const next = new Set(prev);
-                                      next.has(providerName)
-                                        ? next.delete(providerName)
-                                        : next.add(providerName);
-                                      return next;
-                                    })
-                                  }
-                                  className={`w-full flex items-center gap-2 px-3 py-2 hover:bg-surface-2 transition-colors duration-100 ${gi > 0 ? 'border-t border-border' : ''}`}
-                                >
-                                  <span
-                                    className={`text-[9px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                                      PROVIDER_COLORS[
-                                        providerName.toLowerCase()
-                                      ] ?? 'text-muted bg-surface-2'
-                                    }`}
-                                  >
-                                    {providerName}
-                                  </span>
-                                  <span className="text-[10px] text-faint flex-1 text-left">
-                                    {providerModels.length} model
-                                    {providerModels.length !== 1 ? 's' : ''}
-                                  </span>
-                                  {hasActive && !isCollapsed && (
-                                    <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
-                                  )}
-                                  {isCollapsed ? (
-                                    <CaretDownIcon
-                                      size={10}
-                                      weight="bold"
-                                      className="text-faint flex-shrink-0"
-                                    />
-                                  ) : (
-                                    <CaretUpIcon
-                                      size={10}
-                                      weight="bold"
-                                      className="text-faint flex-shrink-0"
-                                    />
-                                  )}
-                                </button>
+                        + Add provider
+                      </a>
+                    </div>
 
-                                {/* Models in this provider */}
-                                {!isCollapsed &&
-                                  providerModels.map((m) => {
-                                    const isActive =
-                                      m.id === selectedModelId &&
-                                      m.providerId === selectedProviderId;
-                                    return (
-                                      <button
-                                        key={`${m.providerId}:${m.id}`}
-                                        onClick={() =>
-                                          handleModelChange(m.id, m.providerId)
-                                        }
-                                        className={`w-full text-left px-3 py-2.5 transition-colors duration-100 flex items-center justify-between gap-3 ${
-                                          isActive
-                                            ? 'bg-accent-muted'
-                                            : 'hover:bg-surface-2'
+                    {models.length === 0 ? (
+                      <p className="text-xs text-faint text-center py-6 px-4">
+                        No models —{' '}
+                        <a
+                          href="/settings"
+                          className="text-accent hover:underline"
+                        >
+                          add a provider
+                        </a>
+                      </p>
+                    ) : (
+                      (() => {
+                        const byok = models.filter(
+                          (m) => m.providerId !== 'server'
+                        );
+                        const server = models.filter(
+                          (m) => m.providerId === 'server'
+                        );
+                        const ordered = [...byok, ...server];
+                        const groups = new Map<string, ModelOption[]>();
+                        for (const m of ordered) {
+                          if (!groups.has(m.provider))
+                            groups.set(m.provider, []);
+                          groups.get(m.provider)!.push(m);
+                        }
+                        return (
+                          <div
+                            className="overflow-y-auto"
+                            style={{ maxHeight: '320px' }}
+                          >
+                            {Array.from(groups.entries()).map(
+                              ([providerName, providerModels], gi) => {
+                                const isCollapsed =
+                                  collapsedProviders.has(providerName);
+                                const hasActive = providerModels.some(
+                                  (m) =>
+                                    m.id === selectedModelId &&
+                                    m.providerId === selectedProviderId
+                                );
+                                return (
+                                  <div key={providerName}>
+                                    <button
+                                      onClick={() =>
+                                        setCollapsedProviders((prev) => {
+                                          const next = new Set(prev);
+                                          next.has(providerName)
+                                            ? next.delete(providerName)
+                                            : next.add(providerName);
+                                          return next;
+                                        })
+                                      }
+                                      className={`w-full flex items-center gap-2 px-3 py-2 hover:bg-surface-2 transition-colors duration-100 ${gi > 0 ? 'border-t border-border' : ''}`}
+                                    >
+                                      <span
+                                        className={`text-[9px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                                          PROVIDER_COLORS[
+                                            providerName.toLowerCase()
+                                          ] ?? 'text-muted bg-surface-2'
                                         }`}
                                       >
-                                        <div className="flex items-center gap-2 min-w-0">
-                                          <span
-                                            className={`text-xs truncate ${isActive ? 'text-accent font-medium' : 'text-text'}`}
+                                        {providerName}
+                                      </span>
+                                      <span className="text-[10px] text-faint flex-1 text-left">
+                                        {providerModels.length} model
+                                        {providerModels.length !== 1 ? 's' : ''}
+                                      </span>
+                                      {hasActive && !isCollapsed && (
+                                        <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
+                                      )}
+                                      {isCollapsed ? (
+                                        <CaretDownIcon
+                                          size={10}
+                                          weight="bold"
+                                          className="text-faint flex-shrink-0"
+                                        />
+                                      ) : (
+                                        <CaretUpIcon
+                                          size={10}
+                                          weight="bold"
+                                          className="text-faint flex-shrink-0"
+                                        />
+                                      )}
+                                    </button>
+                                    {!isCollapsed &&
+                                      providerModels.map((m) => {
+                                        const isActive =
+                                          m.id === selectedModelId &&
+                                          m.providerId === selectedProviderId;
+                                        return (
+                                          <button
+                                            key={`${m.providerId}:${m.id}`}
+                                            onClick={() =>
+                                              handleModelChange(
+                                                m.id,
+                                                m.providerId
+                                              )
+                                            }
+                                            className={`w-full text-left px-3 py-2.5 transition-colors duration-100 flex items-center justify-between gap-3 ${
+                                              isActive
+                                                ? 'bg-accent-muted'
+                                                : 'hover:bg-surface-2'
+                                            }`}
                                           >
-                                            {m.name}
-                                          </span>
-                                          {FREE_TIER_PROVIDERS.has(
-                                            m.provider.toLowerCase()
-                                          ) && (
-                                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 flex-shrink-0">
-                                              free
-                                            </span>
-                                          )}
-                                        </div>
-                                        {isActive && (
-                                          <CheckIcon
-                                            size={12}
-                                            weight="bold"
-                                            className="text-accent flex-shrink-0"
-                                          />
-                                        )}
-                                      </button>
-                                    );
-                                  })}
-                              </div>
-                            );
-                          }
-                        )}
-                      </div>
-                    );
-                  })()
+                                            <div className="flex items-center gap-2 min-w-0">
+                                              <span
+                                                className={`text-xs truncate ${isActive ? 'text-accent font-medium' : 'text-text'}`}
+                                              >
+                                                {m.name}
+                                              </span>
+                                              {FREE_TIER_PROVIDERS.has(
+                                                m.provider.toLowerCase()
+                                              ) && (
+                                                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 flex-shrink-0">
+                                                  free
+                                                </span>
+                                              )}
+                                            </div>
+                                            {isActive && (
+                                              <CheckIcon
+                                                size={12}
+                                                weight="bold"
+                                                className="text-accent flex-shrink-0"
+                                              />
+                                            )}
+                                          </button>
+                                        );
+                                      })}
+                                  </div>
+                                );
+                              }
+                            )}
+                          </div>
+                        );
+                      })()
+                    )}
+                  </div>
                 )}
-              </div>
-            )}
-            <button
-              ref={pickerTriggerRef}
-              onClick={() => setShowModelPicker((v) => !v)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs text-muted hover:text-text bg-surface hover:bg-surface-2 border border-border transition-colors duration-150"
-              title="Select AI model"
-            >
-              <BrainIcon size={12} className="text-accent flex-shrink-0" />
-              <span className="hidden sm:inline max-w-[100px] truncate text-text">
-                {activeModel?.name ?? '…'}
-              </span>
-              {activeModel && (
-                <span
-                  className={`hidden sm:inline text-[9px] font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider ${PROVIDER_COLORS[activeModel.provider.toLowerCase()] ?? 'text-muted bg-surface-2'}`}
+                <button
+                  ref={pickerTriggerRef}
+                  onClick={() => setShowModelPicker((v) => !v)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs text-muted hover:text-text hover:bg-surface-2 transition-colors duration-150"
+                  title="Select AI model"
                 >
-                  {activeModel.provider}
-                </span>
+                  <BrainIcon size={13} className="text-accent flex-shrink-0" />
+                  <span className="hidden sm:inline max-w-[100px] truncate text-text">
+                    {activeModel?.name ?? '…'}
+                  </span>
+                  {activeModel && (
+                    <span
+                      className={`hidden sm:inline text-[9px] font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider ${PROVIDER_COLORS[activeModel.provider.toLowerCase()] ?? 'text-muted bg-surface-2'}`}
+                    >
+                      {activeModel.provider}
+                    </span>
+                  )}
+                  {showModelPicker ? (
+                    <CaretUpIcon
+                      size={9}
+                      weight="bold"
+                      className="hidden sm:inline flex-shrink-0 text-faint"
+                    />
+                  ) : (
+                    <CaretDownIcon
+                      size={9}
+                      weight="bold"
+                      className="hidden sm:inline flex-shrink-0 text-faint"
+                    />
+                  )}
+                </button>
+              </div>
+
+              {/* Clear */}
+              {messages.length > 0 && (
+                <button
+                  onClick={handleClearChat}
+                  disabled={loading}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs text-muted hover:text-text hover:bg-surface-2 disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-150"
+                  title="Clear chat"
+                >
+                  <EraserIcon size={13} />
+                  <span className="hidden sm:inline">Clear</span>
+                </button>
               )}
-              {showModelPicker ? (
-                <CaretUpIcon
-                  size={9}
-                  weight="bold"
-                  className="hidden sm:inline flex-shrink-0 text-faint"
-                />
+            </div>
+
+            {/* Send */}
+            <button
+              onClick={() => send()}
+              disabled={!input.trim() || loading}
+              className="flex items-center justify-center w-8 h-8 rounded-xl bg-accent text-accent-text disabled:opacity-30 disabled:cursor-not-allowed hover:opacity-90 active:scale-95 transition-all duration-150 flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              title="Send (Enter)"
+            >
+              {loading ? (
+                <SpinnerIcon size={14} className="animate-spin" />
               ) : (
-                <CaretDownIcon
-                  size={9}
-                  weight="bold"
-                  className="hidden sm:inline flex-shrink-0 text-faint"
-                />
+                <PaperPlaneTiltIcon size={14} weight="fill" />
               )}
             </button>
           </div>
-
-          {/* Clear bubble */}
-          {messages.length > 0 && (
-            <button
-              onClick={handleClearChat}
-              disabled={loading}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs text-muted hover:text-text bg-surface hover:bg-surface-2 border border-border disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-150"
-              title="Clear chat"
-            >
-              <EraserIcon size={12} />
-              Clear
-            </button>
-          )}
-
-          {/* Send */}
-          <button
-            onClick={() => send()}
-            disabled={!input.trim() || loading}
-            className="p-1.5 rounded-full text-accent hover:bg-accent-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            title="Send (Enter)"
-          >
-            <PaperPlaneTiltIcon size={15} weight="fill" />
-          </button>
         </div>
       </div>
     </div>

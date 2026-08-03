@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ['@react-pdf/renderer'],
+  serverExternalPackages: ['@react-pdf/renderer', 'pdfjs-dist'],
   transpilePackages: ['markitdown-ts'],
   outputFileTracingIncludes: {
     '/api/export/pdf': ['./public/fonts/**/*'],
