@@ -14,7 +14,7 @@ By participating in this project, you are expected to be respectful and construc
 
 ### Bug Reports
 
-Use the [Bug Report](https://github.com/attahiruj/resmd/issues/new?labels=bug) template. Include:
+Use the [Bug Report](https://github.com/tahiru-j/resmd/issues/new?labels=bug) template. Include:
 
 - **Clear description** of the issue
 - **Steps to reproduce** the bug
@@ -25,7 +25,7 @@ Use the [Bug Report](https://github.com/attahiruj/resmd/issues/new?labels=bug) t
 
 ### Feature Requests
 
-Use the [Feature Request](https://github.com/attahiruj/resmd/issues/new?labels=enhancement) template. Include:
+Use the [Feature Request](https://github.com/tahiru-j/resmd/issues/new?labels=enhancement) template. Include:
 
 - **Problem or use case** — what issue does this solve?
 - **Proposed solution** — describe the feature
@@ -34,7 +34,7 @@ Use the [Feature Request](https://github.com/attahiruj/resmd/issues/new?labels=e
 
 ### General Questions
 
-For questions about usage or unclear issues, start a [Discussion](https://github.com/attahiruj/resmd/discussions/) instead of opening an issue.
+For questions about usage or unclear issues, start a [Discussion](https://github.com/tahiru-j/resmd/discussions/) instead of opening an issue.
 
 ---
 
@@ -89,9 +89,9 @@ Visit [http://localhost:3000](http://localhost:3000) to verify the setup.
 
 ### Finding Work
 
-- Look for [`good first issue`](https://github.com/attahiruj/resmd/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) tags for beginner-friendly tasks
+- Look for [`good first issue`](https://github.com/tahiru-j/resmd/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) tags for beginner-friendly tasks
 - Check open issues tagged with `help wanted` for tasks that need assistance
-- Review the [project board](https://github.com/attahiruj/resmd/projects) for planned features
+- Review the [project board](https://github.com/tahiru-j/resmd/projects) for planned features
 
 ### Making Changes
 

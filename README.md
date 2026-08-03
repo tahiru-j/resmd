@@ -3,12 +3,12 @@
 Open Source AI-Powered Resume Builder
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/attahiruj/resmd?style=flat)](https://github.com/attahiruj/resmd/stargazers)
-[![Forks](https://img.shields.io/github/forks/attahiruj/resmd?style=flat)](https://github.com/attahiruj/resmd/network/members)
-[![Contributors](https://img.shields.io/github/contributors/attahiruj/resmd)](https://github.com/attahiruj/resmd/graphs/contributors)
-[![Issues](https://img.shields.io/github/issues/attahiruj/resmd)](https://github.com/attahiruj/resmd/issues)
+[![Stars](https://img.shields.io/github/stars/tahiru-j/resmd?style=flat)](https://github.com/tahiru-j/resmd/stargazers)
+[![Forks](https://img.shields.io/github/forks/tahiru-j/resmd?style=flat)](https://github.com/tahiru-j/resmd/network/members)
+[![Contributors](https://img.shields.io/github/contributors/tahiru-j/resmd)](https://github.com/tahiru-j/resmd/graphs/contributors)
+[![Issues](https://img.shields.io/github/issues/tahiru-j/resmd)](https://github.com/tahiru-j/resmd/issues)
 
-[Live App](https://resmd.app/) · [Documentation](https://github.com/attahiruj/resmd/wiki) · [Contributing](CONTRIBUTING.md)
+[Live App](https://resmd.app/) · [Documentation](https://github.com/tahiru-j/resmd/wiki) · [Contributing](CONTRIBUTING.md)
 
 ---
 
@@ -60,7 +60,7 @@ Resmd replaces rigid form-based editors with **ResMarkup** — a lightweight pla
 You can run resmd locally without a Supabase account using the built-in SQLite provider:
 
 ```bash
-git clone https://github.com/attahiruj/resmd.git
+git clone https://github.com/tahiru-j/resmd.git
 cd resmd
 npm install
 cp .env.local.example .env.local
@@ -130,7 +130,7 @@ Authorization: Bearer <your-mcp-key>
 
 ### Claude Code
 
-Clone and build the [resmd-mcp](https://github.com/attahiruj/resmd-mcp) server, then register it with Claude Code:
+Clone and build the [resmd-mcp](https://github.com/tahiru-j/resmd-mcp) server, then register it with Claude Code:
 
 ```bash
 # Against the hosted app
@@ -165,7 +165,7 @@ claude mcp add resmd \
 | `export_pdf`       | Export resume as base64 PDF             |
 | `list_templates`   | List available templates                |
 
-See the [resmd-mcp](https://github.com/attahiruj/resmd-mcp) repo for full setup and n8n/Make integration details.
+See the [resmd-mcp](https://github.com/tahiru-j/resmd-mcp) repo for full setup and n8n/Make integration details.
 
 ---
 

@@ -221,7 +221,7 @@ export default function McpKeysModal({ onClose }: McpKeysModalProps) {
             </code>{' '}
             in API calls. See{' '}
             <a
-              href="https://github.com/attahiruj/resmd-mcp"
+              href="https://github.com/tahiru-j/resmd-mcp"
               target="_blank"
               rel="noopener noreferrer"
               className="text-accent hover:underline"

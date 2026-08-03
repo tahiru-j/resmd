@@ -51,7 +51,7 @@ function Nav() {
             Features
           </a>
           <a
-            href="https://github.com/attahiruj/resmd"
+            href="https://github.com/tahiru-j/resmd"
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-muted hover:text-text transition-colors"
