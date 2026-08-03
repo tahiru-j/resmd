@@ -1,11 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import {
   Warning,
   DownloadSimpleIcon,
   CopySimpleIcon,
+  CaretDownIcon,
+  FilePdfIcon,
+  FileTextIcon,
+  SpinnerGapIcon,
 } from '@phosphor-icons/react';
 import { applyTheme, getStoredThemePrefs } from '@/lib/themes';
 import { useProfile } from '@/hooks/useProfile';
@@ -37,16 +41,33 @@ export default function Toolbar({
 }: ToolbarProps) {
   const [isDark, setIsDark] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [showPlaceholderWarning, setShowPlaceholderWarning] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const { user, profile } = useProfile();
   const router = useRouter();
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const { themeId, mode } = getStoredThemePrefs();
     applyTheme(themeId, mode);
     setIsDark(mode === 'dark');
   }, []);
+
+  // Close export menu on outside click
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        exportMenuRef.current &&
+        !exportMenuRef.current.contains(e.target as Node)
+      ) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showExportMenu]);
 
   const toggleTheme = () => {
     const newMode = isDark ? 'light' : 'dark';
@@ -86,12 +107,28 @@ export default function Toolbar({
   };
 
   const handleExportPDF = () => {
+    setShowExportMenu(false);
     if (!resumeId || isExporting) return;
     if (rawContent && hasPlaceholders(rawContent)) {
       setShowPlaceholderWarning(true);
     } else {
       doExport();
     }
+  };
+
+  const handleDownloadMd = () => {
+    setShowExportMenu(false);
+    if (!rawContent) return;
+    const blob = new Blob([rawContent], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const safeTitle =
+      (resumeTitle ?? 'resume').replace(/[^a-z0-9\-_ ]/gi, '').trim() ||
+      'resume';
+    a.download = `${safeTitle}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleSignOut = async () => {
@@ -101,6 +138,7 @@ export default function Toolbar({
 
   const lastSavedLabel = lastSaved ? formatRelative(lastSaved) : null;
   const email = profile?.email ?? user?.email ?? '';
+  const canExport = !!rawContent || !!resumeId;
 
   return (
     <>
@@ -199,27 +237,64 @@ export default function Toolbar({
               </span>
             )}
 
-            <button
-              onClick={handleExportPDF}
-              disabled={!resumeId || isExporting}
-              title={
-                !resumeId
-                  ? 'Sign in to export'
-                  : isExporting
-                    ? 'Generating…'
-                    : 'Export PDF'
-              }
-              className={`text-sm px-3 py-1.5 rounded-lg border border-border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex items-center gap-1.5 ${
-                !resumeId || isExporting
-                  ? 'text-faint cursor-not-allowed opacity-50'
-                  : 'text-text hover:bg-surface-2'
-              }`}
-            >
-              <DownloadSimpleIcon size={15} weight="bold" />
-              <span className="hidden sm:inline">
-                {isExporting ? 'Exporting…' : 'Export PDF'}
-              </span>
-            </button>
+            {/* Export dropdown */}
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setShowExportMenu((v) => !v)}
+                disabled={!canExport || isExporting}
+                title="Export"
+                className={`text-sm px-3 py-1.5 rounded-lg border border-border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex items-center gap-1.5 ${
+                  !canExport || isExporting
+                    ? 'text-faint cursor-not-allowed opacity-50'
+                    : 'text-text hover:bg-surface-2'
+                }`}
+              >
+                {isExporting ? (
+                  <SpinnerGapIcon size={15} className="animate-spin" />
+                ) : (
+                  <DownloadSimpleIcon size={15} weight="bold" />
+                )}
+                <span className="hidden sm:inline">
+                  {isExporting ? 'Exporting…' : 'Export'}
+                </span>
+                <CaretDownIcon size={12} className="hidden sm:block" />
+              </button>
+
+              {showExportMenu && (
+                <div className="absolute right-0 top-full mt-1 w-44 bg-surface border border-border rounded-lg shadow-xl z-50 overflow-hidden">
+                  <button
+                    onClick={handleExportPDF}
+                    disabled={!resumeId}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left transition-colors ${
+                      !resumeId
+                        ? 'text-faint cursor-not-allowed'
+                        : 'text-text hover:bg-surface-2'
+                    }`}
+                  >
+                    <FilePdfIcon
+                      size={16}
+                      className="text-muted flex-shrink-0"
+                    />
+                    <span>Export PDF</span>
+                  </button>
+                  <button
+                    onClick={handleDownloadMd}
+                    disabled={!rawContent}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left transition-colors ${
+                      !rawContent
+                        ? 'text-faint cursor-not-allowed'
+                        : 'text-text hover:bg-surface-2'
+                    }`}
+                  >
+                    <FileTextIcon
+                      size={16}
+                      className="text-muted flex-shrink-0"
+                    />
+                    <span>Download .md</span>
+                  </button>
+                </div>
+              )}
+            </div>
 
             <AvatarDropdown
               email={email}
