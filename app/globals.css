@@ -210,6 +210,71 @@
 }
 
 /* ============================================================
+   Inline Diff Decorations (AI suggestions shown in editor)
+   ============================================================ */
+/* Row backgrounds (layout is handled by inline styles in toDOM) */
+.cm-diff-before {
+  background: var(--color-danger-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+.cm-diff-before .cm-diff-sign {
+  color: var(--color-danger);
+  opacity: 0.7;
+}
+.cm-diff-before span:last-of-type {
+  color: var(--color-danger);
+  opacity: 0.85;
+}
+
+.cm-diff-after {
+  background: var(--color-success-bg);
+}
+.cm-diff-after .cm-diff-sign {
+  color: var(--color-success);
+  opacity: 0.8;
+}
+.cm-diff-after span:first-of-type + span {
+  color: var(--color-success);
+}
+
+/* Accept / reject buttons */
+.cm-diff-accept-btn,
+.cm-diff-reject-btn {
+  height: 22px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  transition:
+    background 120ms,
+    color 120ms,
+    opacity 120ms;
+}
+.cm-diff-accept-btn {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+.cm-diff-accept-btn:hover {
+  background: var(--color-success);
+  color: var(--color-bg);
+}
+.cm-diff-reject-btn {
+  background: transparent;
+  color: var(--color-danger);
+  opacity: 0.45;
+}
+.cm-diff-reject-btn:hover {
+  background: var(--color-danger-bg);
+  opacity: 1;
+}
+
+/* ============================================================
    CodeMirror structural
    ============================================================ */
 .cm-editor {

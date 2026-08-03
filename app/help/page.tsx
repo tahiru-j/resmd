@@ -601,7 +601,7 @@ GitHub: github.com/alexrivera`}</Code>
                 </strong>{' '}
                 from{' '}
                 <a
-                  href="https://github.com/attahiruj/resmd-mcp"
+                  href="https://github.com/tahiru-j/resmd-mcp"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-accent hover:underline"
@@ -610,7 +610,7 @@ GitHub: github.com/alexrivera`}</Code>
                 </a>
                 :
               </p>
-              <Code>{`git clone https://github.com/attahiruj/resmd-mcp
+              <Code>{`git clone https://github.com/tahiru-j/resmd-mcp
 cd resmd-mcp
 npm install && npm run build`}</Code>
               <p className="text-muted text-sm mt-4 mb-3">
@@ -684,7 +684,7 @@ claude mcp add resmd \\
             </p>
             <div className="flex gap-3">
               <a
-                href="https://github.com/attahiruj/resmd"
+                href="https://github.com/tahiru-j/resmd"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-muted hover:text-text border border-border px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-1.5"
@@ -693,7 +693,7 @@ claude mcp add resmd \\
                 Star on GitHub
               </a>
               <a
-                href="https://github.com/attahiruj/resmd/issues"
+                href="https://github.com/tahiru-j/resmd/issues"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-muted hover:text-text border border-border px-4 py-2 rounded-lg transition-colors"

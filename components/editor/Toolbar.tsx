@@ -2,23 +2,21 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import Link from 'next/link';
 import {
-  SunIcon,
-  MoonIcon,
   Warning,
   DownloadSimpleIcon,
-  ChatTeardropTextIcon,
-  QuestionIcon,
-  CoffeeIcon,
-  SignOutIcon,
   CopySimpleIcon,
+  CaretDownIcon,
+  FilePdfIcon,
+  FileTextIcon,
+  SpinnerGapIcon,
 } from '@phosphor-icons/react';
 import { applyTheme, getStoredThemePrefs } from '@/lib/themes';
 import { useProfile } from '@/hooks/useProfile';
 import Navbar from '@/components/ui/Navbar';
 import { hasPlaceholders } from '@/lib/inline';
 import FeedbackModal from '@/components/ui/FeedbackModal';
+import AvatarDropdown from '@/components/ui/AvatarDropdown';
 import { getClientAuthProvider } from '@/lib/db/client';
 import { useRouter } from 'next/navigation';
 
@@ -43,16 +41,33 @@ export default function Toolbar({
 }: ToolbarProps) {
   const [isDark, setIsDark] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [showPlaceholderWarning, setShowPlaceholderWarning] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const { user, profile } = useProfile();
   const router = useRouter();
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const { themeId, mode } = getStoredThemePrefs();
     applyTheme(themeId, mode);
     setIsDark(mode === 'dark');
   }, []);
+
+  // Close export menu on outside click
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        exportMenuRef.current &&
+        !exportMenuRef.current.contains(e.target as Node)
+      ) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showExportMenu]);
 
   const toggleTheme = () => {
     const newMode = isDark ? 'light' : 'dark';
@@ -92,12 +107,28 @@ export default function Toolbar({
   };
 
   const handleExportPDF = () => {
+    setShowExportMenu(false);
     if (!resumeId || isExporting) return;
     if (rawContent && hasPlaceholders(rawContent)) {
       setShowPlaceholderWarning(true);
     } else {
       doExport();
     }
+  };
+
+  const handleDownloadMd = () => {
+    setShowExportMenu(false);
+    if (!rawContent) return;
+    const blob = new Blob([rawContent], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const safeTitle =
+      (resumeTitle ?? 'resume').replace(/[^a-z0-9\-_ ]/gi, '').trim() ||
+      'resume';
+    a.download = `${safeTitle}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleSignOut = async () => {
@@ -107,6 +138,7 @@ export default function Toolbar({
 
   const lastSavedLabel = lastSaved ? formatRelative(lastSaved) : null;
   const email = profile?.email ?? user?.email ?? '';
+  const canExport = !!rawContent || !!resumeId;
 
   return (
     <>
@@ -205,27 +237,64 @@ export default function Toolbar({
               </span>
             )}
 
-            <button
-              onClick={handleExportPDF}
-              disabled={!resumeId || isExporting}
-              title={
-                !resumeId
-                  ? 'Sign in to export'
-                  : isExporting
-                    ? 'Generating…'
-                    : 'Export PDF'
-              }
-              className={`text-sm px-3 py-1.5 rounded-lg border border-border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex items-center gap-1.5 ${
-                !resumeId || isExporting
-                  ? 'text-faint cursor-not-allowed opacity-50'
-                  : 'text-text hover:bg-surface-2'
-              }`}
-            >
-              <DownloadSimpleIcon size={15} weight="bold" />
-              <span className="hidden sm:inline">
-                {isExporting ? 'Exporting…' : 'Export PDF'}
-              </span>
-            </button>
+            {/* Export dropdown */}
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setShowExportMenu((v) => !v)}
+                disabled={!canExport || isExporting}
+                title="Export"
+                className={`text-sm px-3 py-1.5 rounded-lg border border-border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex items-center gap-1.5 ${
+                  !canExport || isExporting
+                    ? 'text-faint cursor-not-allowed opacity-50'
+                    : 'text-text hover:bg-surface-2'
+                }`}
+              >
+                {isExporting ? (
+                  <SpinnerGapIcon size={15} className="animate-spin" />
+                ) : (
+                  <DownloadSimpleIcon size={15} weight="bold" />
+                )}
+                <span className="hidden sm:inline">
+                  {isExporting ? 'Exporting…' : 'Export'}
+                </span>
+                <CaretDownIcon size={12} className="hidden sm:block" />
+              </button>
+
+              {showExportMenu && (
+                <div className="absolute right-0 top-full mt-1 w-44 bg-surface border border-border rounded-lg shadow-xl z-50 overflow-hidden">
+                  <button
+                    onClick={handleExportPDF}
+                    disabled={!resumeId}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left transition-colors ${
+                      !resumeId
+                        ? 'text-faint cursor-not-allowed'
+                        : 'text-text hover:bg-surface-2'
+                    }`}
+                  >
+                    <FilePdfIcon
+                      size={16}
+                      className="text-muted flex-shrink-0"
+                    />
+                    <span>Export PDF</span>
+                  </button>
+                  <button
+                    onClick={handleDownloadMd}
+                    disabled={!rawContent}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left transition-colors ${
+                      !rawContent
+                        ? 'text-faint cursor-not-allowed'
+                        : 'text-text hover:bg-surface-2'
+                    }`}
+                  >
+                    <FileTextIcon
+                      size={16}
+                      className="text-muted flex-shrink-0"
+                    />
+                    <span>Download .md</span>
+                  </button>
+                </div>
+              )}
+            </div>
 
             <AvatarDropdown
               email={email}
@@ -238,113 +307,6 @@ export default function Toolbar({
         }
       />
     </>
-  );
-}
-
-function AvatarDropdown({
-  email,
-  isDark,
-  onToggleTheme,
-  onShowFeedback,
-  onSignOut,
-}: {
-  email: string;
-  isDark: boolean;
-  onToggleTheme: () => void;
-  onShowFeedback: () => void;
-  onSignOut: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const initial = email?.[0]?.toUpperCase() || '?';
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-8 h-8 rounded-full bg-accent/10 text-accent flex items-center justify-center text-sm font-semibold hover:bg-accent/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        title="Account"
-      >
-        {initial}
-      </button>
-
-      {open && (
-        <div className="absolute right-0 top-full mt-2 w-56 bg-surface border border-border rounded-xl shadow-xl overflow-hidden z-30">
-          <div className="px-4 py-3 border-b border-border">
-            <p className="text-[11px] text-muted truncate">
-              {email || 'Guest'}
-            </p>
-          </div>
-
-          {/* Preferences */}
-          <div className="py-1">
-            <button
-              onClick={onToggleTheme}
-              className="w-full px-4 py-2 text-left text-sm text-text hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
-            >
-              {isDark ? <SunIcon size={15} /> : <MoonIcon size={15} />}
-              {isDark ? 'Light mode' : 'Dark mode'}
-            </button>
-            <button
-              onClick={() => {
-                onShowFeedback();
-                setOpen(false);
-              }}
-              className="w-full px-4 py-2 text-left text-sm text-text hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
-            >
-              <ChatTeardropTextIcon size={15} />
-              Feedback
-            </button>
-          </div>
-
-          {/* Help & Support */}
-          <div className="border-t border-border py-1">
-            <Link
-              href="/help"
-              onClick={() => setOpen(false)}
-              className="w-full px-4 py-2 text-left text-sm text-text hover:bg-surface-2 flex items-center gap-2.5 transition-colors"
-            >
-              <QuestionIcon size={15} />
-              Help
-            </Link>
-            <a
-              href="https://buymeacoffee.com/hattahiroo"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setOpen(false)}
-              className="w-full px-4 py-2 text-left text-sm text-text hover:bg-surface-2 flex items-center gap-2.5 transition-colors block"
-            >
-              <CoffeeIcon size={15} />
-              Support resmd
-            </a>
-          </div>
-
-          {/* Sign out */}
-          <div className="border-t border-border py-1">
-            <button
-              onClick={() => {
-                setOpen(false);
-                onSignOut();
-              }}
-              className="w-full px-4 py-2 text-left text-sm text-danger hover:bg-danger/5 flex items-center gap-2.5 transition-colors"
-            >
-              <SignOutIcon size={15} />
-              Sign out
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
   );
 }
 

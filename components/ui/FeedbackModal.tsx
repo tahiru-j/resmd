@@ -63,7 +63,7 @@ export default function FeedbackModal({ onClose }: FeedbackModalProps) {
           <div className="text-center py-2 space-y-3">
             <p className="text-xs text-muted">We really appreciate it.</p>
             <a
-              href="https://github.com/attahiruj/resmd"
+              href="https://github.com/tahiru-j/resmd"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-text border border-border hover:border-text/30 px-4 py-3 rounded-lg transition-colors duration-150"

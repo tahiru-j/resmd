@@ -1,26 +1,114 @@
 import { OpenAICompatibleProvider } from './openai-compatible';
-import type { AIProvider } from './types';
+import { AnthropicCompatibleProvider } from './anthropic-compatible';
+import type { AIProvider, AIModel } from './types';
+import type { AdapterType } from '@/lib/db/interfaces';
 import CURATED_MODELS from './models.json';
 import { debug } from '@/lib/env';
+import { getDbProvider } from '@/lib/db/server';
+import { decryptApiKey } from '@/lib/crypto';
 
 export type { AIModel, AIProvider, ChatMessage, ChatRequest } from './types';
-export { createSSEStream, createSuggestionFilter } from './stream';
+export {
+  createSSEStream,
+  createAnthropicSSEStream,
+  createSuggestionFilter,
+} from './stream';
 export { OpenAICompatibleProvider } from './openai-compatible';
+export { AnthropicCompatibleProvider } from './anthropic-compatible';
+
+// ---------------------------------------------------------------------------
+// Preset provider definitions — used by Settings UI for quick-add
+// ---------------------------------------------------------------------------
+
+export { PRESET_PROVIDERS } from './presets';
+
+// ---------------------------------------------------------------------------
+// Provider factory — builds the right adapter based on wire format
+// ---------------------------------------------------------------------------
+
+function getModelsFilter(baseUrl: string): (m: { id: string }) => boolean {
+  if (baseUrl.includes('openai.com'))
+    return (m) => /^gpt-/.test(m.id) && !m.id.includes('instruct');
+  if (baseUrl.includes('generativelanguage'))
+    return (m) =>
+      /^gemini-/.test(m.id) &&
+      !/-tts/.test(m.id) &&
+      !/embedding/.test(m.id) &&
+      !/-vision/.test(m.id) &&
+      !/imagen/.test(m.id) &&
+      !/robotics/.test(m.id) &&
+      !/-audio/.test(m.id) &&
+      !/aqa/.test(m.id);
+  return () => true;
+}
+
+export function buildProvider(
+  config: { name: string; adapterType: AdapterType; baseUrl: string },
+  apiKey: string
+): AIProvider {
+  if (config.adapterType === 'anthropic') {
+    return new AnthropicCompatibleProvider({ ...config, apiKey });
+  }
+  return new OpenAICompatibleProvider({
+    name: config.name,
+    baseUrl: config.baseUrl,
+    apiKey,
+    defaultModel: '',
+    modelsUrl: `${config.baseUrl}/models`,
+    modelsFilter: getModelsFilter(config.baseUrl),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// BYOK resolution helpers — called by AI routes and model list
+// ---------------------------------------------------------------------------
+
+export async function resolveUserProvider(
+  userId: string,
+  providerId: string
+): Promise<AIProvider> {
+  const record = await getDbProvider().getUserProviderKey(providerId, userId);
+  if (!record) throw new Error('Provider not found');
+  const rawKey = decryptApiKey(record.encryptedKey);
+  return buildProvider(
+    {
+      name: record.name,
+      adapterType: record.adapterType,
+      baseUrl: record.baseUrl,
+    },
+    rawKey
+  );
+}
+
+export async function listUserProviderModels(
+  userId: string
+): Promise<AIModel[]> {
+  const stored = await getDbProvider().listUserProviders(userId);
+  const results = await Promise.allSettled(
+    stored.map(async (p) => {
+      const record = await getDbProvider().getUserProviderKey(p.id, userId);
+      if (!record) return [] as AIModel[];
+      const provider = buildProvider(
+        { name: p.name, adapterType: p.adapterType, baseUrl: p.baseUrl },
+        decryptApiKey(record.encryptedKey)
+      );
+      const models = (await provider.listModels?.()) ?? [];
+      return models.map((m) => ({ ...m, providerId: p.id }));
+    })
+  );
+  results.forEach((r, i) => {
+    if (r.status === 'rejected')
+      console.error(
+        `[BYOK] listModels failed for provider ${stored[i]?.name}:`,
+        r.reason
+      );
+  });
+  return results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+}
 
 // ---------------------------------------------------------------------------
 // Provider factories — one per provider, only constructed when key is present
 // ---------------------------------------------------------------------------
-
-function makeMinimaxProvider(key: string): AIProvider {
-  return new OpenAICompatibleProvider({
-    name: 'minimax',
-    baseUrl: 'https://api.minimax.io/v1',
-    apiKey: key,
-    defaultModel: 'M2-her',
-    maxTokensParam: 'max_completion_tokens',
-    staticModels: CURATED_MODELS.minimax,
-  });
-}
 
 function makeGroqProvider(key: string): AIProvider {
   return new OpenAICompatibleProvider({
@@ -28,7 +116,11 @@ function makeGroqProvider(key: string): AIProvider {
     baseUrl: 'https://api.groq.com/openai/v1',
     apiKey: key,
     defaultModel: 'llama-3.3-70b-versatile',
-    staticModels: CURATED_MODELS.groq,
+    modelsUrl: 'https://api.groq.com/openai/v1/models',
+    modelsFilter: (m) =>
+      !m.id.includes('whisper') &&
+      !m.id.includes('guard') &&
+      !m.id.includes('tool-use'),
   });
 }
 
@@ -55,8 +147,6 @@ function makeOpenRouterProvider(key: string): AIProvider {
  */
 export function getActiveProviders(): AIProvider[] {
   const providers: AIProvider[] = [];
-  if (process.env.MINIMAX_API_KEY)
-    providers.push(makeMinimaxProvider(process.env.MINIMAX_API_KEY));
   if (process.env.GROQ_API_KEY)
     providers.push(makeGroqProvider(process.env.GROQ_API_KEY));
   if (process.env.OPENROUTER_API_KEY)

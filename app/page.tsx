@@ -25,8 +25,10 @@ export default function Home() {
     <div className="min-h-screen bg-bg text-text font-ui overflow-x-hidden">
       <div className="bg-dot-grid fixed inset-0 pointer-events-none" />
       <Nav />
-      <Hero />
-      <HomeBelowFold />
+      <main>
+        <Hero />
+        <HomeBelowFold />
+      </main>
     </div>
   );
 }
@@ -49,7 +51,7 @@ function Nav() {
             Features
           </a>
           <a
-            href="https://github.com/attahiruj/resmd"
+            href="https://github.com/tahiru-j/resmd"
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-muted hover:text-text transition-colors"

@@ -538,7 +538,7 @@ function FooterCTA() {
               Start free
             </Link>
             <a
-              href="https://github.com/attahiruj/resmd"
+              href="https://github.com/tahiru-j/resmd"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 border border-border hover:border-muted/40 text-muted hover:text-text px-6 py-3.5 rounded-full text-[14px] transition-all duration-200 hover:bg-surface"
@@ -583,7 +583,7 @@ function FooterCTA() {
               Terms
             </Link>
             <a
-              href="https://github.com/attahiruj/resmd"
+              href="https://github.com/tahiru-j/resmd"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-text transition-colors flex items-center gap-1"

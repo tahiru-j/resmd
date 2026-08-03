@@ -8,7 +8,9 @@ import {
   ArrowRightIcon,
   CaretLeftIcon,
   CaretRightIcon,
+  CheckIcon,
   GitBranchIcon,
+  XIcon,
 } from '@phosphor-icons/react';
 import Toolbar from '@/components/editor/Toolbar';
 import PreviewPane from '@/components/preview/PreviewPane';
@@ -19,6 +21,9 @@ import ErrorBoundary from '@/components/editor/ErrorBoundary';
 import GuestBanner from '@/components/editor/GuestBanner';
 import CloneModal from '@/components/variants/CloneModal';
 import type { Resume } from '@/types/resume';
+import type { PendingEdit } from '@/types/pendingEdit';
+import type { Edit } from '@/lib/prompts';
+import { trackSuggestion } from '@/lib/ai';
 
 // CodeMirror is browser-only
 const Editor = dynamic(() => import('@/components/editor/Editor'), {
@@ -26,7 +31,9 @@ const Editor = dynamic(() => import('@/components/editor/Editor'), {
 });
 
 const MIN_PANE_PX = 300;
-const DEFAULT_SPLIT = 40;
+const DEFAULT_SPLIT = 50;
+const SPLIT_LARGE = 60;
+const BREAKPOINT_LG = 1280;
 const AUTOSAVE_DELAY = 2000;
 
 type MobileTab = 'write' | 'preview';
@@ -47,6 +54,7 @@ export default function EditorClient({
   const [resumeTitle, setResumeTitle] = useState(resume.title);
 
   const [splitPct, setSplitPct] = useState(DEFAULT_SPLIT);
+  const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTab>('write');
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -63,6 +71,8 @@ export default function EditorClient({
   // Track active resume ID independently so autosave targets the right record
   const activeResumeIdRef = useRef(resume.id);
   const [activeResumeId, setActiveResumeId] = useState(resume.id);
+
+  const [pendingEdits, setPendingEdits] = useState<PendingEdit[]>([]);
 
   const [jumpTarget, setJumpTarget] = useState<{
     word: string;
@@ -115,6 +125,7 @@ export default function EditorClient({
   resumeTitleRef.current = resumeTitle;
 
   useEffect(() => {
+    // Restore or set split percentage
     const savedSplit = localStorage.getItem('resmd_split');
     if (savedSplit) {
       const n = Number(savedSplit);
@@ -122,7 +133,22 @@ export default function EditorClient({
         setSplitPct(n);
         splitPctRef.current = n;
       }
+    } else if (window.innerWidth >= BREAKPOINT_LG) {
+      setSplitPct(SPLIT_LARGE);
+      splitPctRef.current = SPLIT_LARGE;
     }
+
+    // Restore preview collapsed state or default by screen size
+    const savedCollapsed = localStorage.getItem('resmd_preview_collapsed');
+    if (savedCollapsed !== null) {
+      setPreviewCollapsed(savedCollapsed === '1');
+    }
+
+    // Collapse variants rail on smaller screens
+    if (window.innerWidth < BREAKPOINT_LG) {
+      setVariantsOpen(false);
+    }
+
     setIsMounted(true);
 
     // Show swipe hint once on mobile
@@ -222,6 +248,74 @@ export default function EditorClient({
     },
     [scheduleAutosave]
   );
+
+  const handleEditsReceived = useCallback((edits: Edit[], model?: string) => {
+    const newEdits: PendingEdit[] = edits.map((e) => ({
+      id: crypto.randomUUID(),
+      search: e.search,
+      replace: e.replace,
+      status: 'pending',
+      model,
+    }));
+    setPendingEdits((prev) => [...prev, ...newEdits]);
+  }, []);
+
+  const handleAcceptEdit = useCallback(
+    (id: string) => {
+      setPendingEdits((prev) => {
+        const edit = prev.find((e) => e.id === id);
+        if (!edit || edit.status !== 'pending') return prev;
+        handleApplyEdit(edit.search, edit.replace);
+        trackSuggestion('accepted', 1, edit.model);
+        return prev.map((e) =>
+          e.id === id ? { ...e, status: 'applied' as const } : e
+        );
+      });
+    },
+    [handleApplyEdit]
+  );
+
+  const handleRejectEdit = useCallback((id: string) => {
+    setPendingEdits((prev) => {
+      const edit = prev.find((e) => e.id === id);
+      if (!edit || edit.status !== 'pending') return prev;
+      trackSuggestion('rejected', 1, edit.model);
+      return prev.map((e) =>
+        e.id === id ? { ...e, status: 'dismissed' as const } : e
+      );
+    });
+  }, []);
+
+  const handleAcceptAllEdits = useCallback(() => {
+    const pending = pendingEdits.filter((e) => e.status === 'pending');
+    if (pending.length === 0) return;
+    setRawContent((prev) => {
+      let result = prev;
+      for (const edit of pending) {
+        if (result.includes(edit.search))
+          result = result.replace(edit.search, edit.replace);
+      }
+      return result;
+    });
+    scheduleAutosave();
+    trackSuggestion('accepted', pending.length, pending[0]?.model);
+    setPendingEdits((prev) =>
+      prev.map((e) =>
+        e.status === 'pending' ? { ...e, status: 'applied' as const } : e
+      )
+    );
+  }, [pendingEdits, scheduleAutosave]);
+
+  const handleRejectAllEdits = useCallback(() => {
+    const pending = pendingEdits.filter((e) => e.status === 'pending');
+    if (pending.length === 0) return;
+    trackSuggestion('rejected', pending.length, pending[0]?.model);
+    setPendingEdits((prev) =>
+      prev.map((e) =>
+        e.status === 'pending' ? { ...e, status: 'dismissed' as const } : e
+      )
+    );
+  }, [pendingEdits]);
 
   const handleReplaceResume = useCallback(
     (content: string) => {
@@ -412,7 +506,7 @@ export default function EditorClient({
 
   return (
     <ErrorBoundary>
-      <div className="flex flex-col h-dvh overflow-hidden bg-bg">
+      <main className="flex flex-col h-dvh overflow-hidden bg-bg">
         <Toolbar
           lastSaved={lastSaved}
           resumeTitle={resumeTitle}
@@ -426,7 +520,7 @@ export default function EditorClient({
         {isGuest && <GuestBanner />}
 
         {/* Mobile tab bar (<md) */}
-        <div className="md:hidden flex h-12 border-b border-border bg-surface flex-shrink-0 px-2 gap-1 items-center">
+        <div className="xl:hidden flex h-12 border-b border-border bg-surface flex-shrink-0 px-2 gap-1 items-center">
           <button
             onClick={() => setMobileTab('write')}
             className={`flex-1 py-1.5 text-sm font-medium rounded-full transition-colors duration-150 ${
@@ -449,9 +543,9 @@ export default function EditorClient({
           </button>
         </div>
 
-        {/* Mobile single-pane body */}
+        {/* Single-pane body (mobile + tablet) */}
         <div
-          className="md:hidden relative flex-1 overflow-hidden min-h-0"
+          className="xl:hidden relative flex-1 overflow-hidden min-h-0"
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
         >
@@ -464,28 +558,37 @@ export default function EditorClient({
               </div>
             </div>
           )}
-          {mobileTab === 'write' ? (
-            <div className="h-full flex flex-col bg-editor-bg">
-              <div className="flex-1 min-h-0 overflow-hidden">
-                {isMounted && (
-                  <Editor
-                    value={rawContent}
-                    onChange={handleContentChange}
-                    jumpTarget={jumpTarget}
-                    onJumpComplete={() => setJumpTarget(null)}
-                    resumeContext={rawContent}
-                    onEnhance={handleApplyEdit}
-                  />
-                )}
-              </div>
-              <AIChat
-                resumeContent={rawContent}
-                onApplyEdit={handleApplyEdit}
-                onReplaceResume={handleReplaceResume}
-                isGuest={isGuest}
-              />
+          <div
+            className={`h-full flex flex-col bg-editor-bg ${mobileTab === 'write' ? '' : 'hidden'}`}
+          >
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {isMounted && (
+                <Editor
+                  value={rawContent}
+                  onChange={handleContentChange}
+                  jumpTarget={jumpTarget}
+                  onJumpComplete={() => setJumpTarget(null)}
+                  resumeContext={rawContent}
+                  onEnhance={handleApplyEdit}
+                  pendingEdits={pendingEdits}
+                  onAcceptEdit={handleAcceptEdit}
+                  onRejectEdit={handleRejectEdit}
+                />
+              )}
             </div>
-          ) : (
+            <PendingEditsBar
+              count={pendingEdits.filter((e) => e.status === 'pending').length}
+              onAcceptAll={handleAcceptAllEdits}
+              onRejectAll={handleRejectAllEdits}
+            />
+            <AIChat
+              resumeContent={rawContent}
+              onEditsReceived={handleEditsReceived}
+              onReplaceResume={handleReplaceResume}
+              isGuest={isGuest}
+            />
+          </div>
+          <div className={mobileTab === 'preview' ? 'h-full' : 'hidden'}>
             <PreviewPane
               rawContent={rawContent}
               templateId={templateId}
@@ -494,11 +597,11 @@ export default function EditorClient({
               onTextDoubleClick={handlePreviewDoubleClick}
               onOpenTemplatePicker={() => setShowTemplatePicker(true)}
             />
-          )}
+          </div>
         </div>
 
-        {/* Desktop split-pane body (≥md) */}
-        <div className="hidden md:flex flex-1 min-h-0 p-4 gap-3">
+        {/* Desktop split-pane body (≥xl) */}
+        <div className="hidden xl:flex flex-1 min-h-0 p-4 gap-3">
           {/* Variants rail — always mounted for authenticated users */}
           {!isGuest && (
             <VariantsRail
@@ -521,7 +624,7 @@ export default function EditorClient({
             <div
               ref={leftPaneRef}
               className="flex flex-col overflow-hidden flex-shrink-0 bg-editor-bg"
-              style={{ width: `${splitPct}%` }}
+              style={{ width: previewCollapsed ? '100%' : `${splitPct}%` }}
             >
               <div className="flex-1 min-h-0 overflow-hidden">
                 {isMounted && (
@@ -532,42 +635,76 @@ export default function EditorClient({
                     onJumpComplete={() => setJumpTarget(null)}
                     resumeContext={rawContent}
                     onEnhance={handleApplyEdit}
+                    pendingEdits={pendingEdits}
+                    onAcceptEdit={handleAcceptEdit}
+                    onRejectEdit={handleRejectEdit}
                   />
                 )}
               </div>
+              <PendingEditsBar
+                count={
+                  pendingEdits.filter((e) => e.status === 'pending').length
+                }
+                onAcceptAll={handleAcceptAllEdits}
+                onRejectAll={handleRejectAllEdits}
+              />
               <AIChat
                 resumeContent={rawContent}
-                onApplyEdit={handleApplyEdit}
+                onEditsReceived={handleEditsReceived}
                 onReplaceResume={handleReplaceResume}
                 isGuest={isGuest}
               />
             </div>
 
-            {/* Drag divider */}
+            {/* Drag divider / preview toggle */}
             <div
-              className="w-1 flex-shrink-0 bg-border hover:bg-accent transition-colors duration-150 select-none"
-              style={{ cursor: 'col-resize' }}
-              onMouseDown={handleDividerMouseDown}
-            />
+              className="relative w-1 flex-shrink-0 bg-border select-none flex items-center justify-center group"
+              style={{ cursor: previewCollapsed ? 'default' : 'col-resize' }}
+              onMouseDown={
+                previewCollapsed ? undefined : handleDividerMouseDown
+              }
+            >
+              <button
+                className="absolute z-10 hidden xl:flex items-center justify-center w-5 h-8 rounded bg-border hover:bg-accent transition-colors duration-150 opacity-0 group-hover:opacity-100"
+                onClick={() =>
+                  setPreviewCollapsed((v) => {
+                    const next = !v;
+                    localStorage.setItem(
+                      'resmd_preview_collapsed',
+                      next ? '1' : '0'
+                    );
+                    return next;
+                  })
+                }
+              >
+                {previewCollapsed ? (
+                  <CaretLeftIcon size={10} />
+                ) : (
+                  <CaretRightIcon size={10} />
+                )}
+              </button>
+            </div>
 
             {/* Preview pane */}
-            <div
-              ref={rightPaneRef}
-              className="flex-1 overflow-hidden"
-              style={{ width: `${100 - splitPct}%` }}
-            >
-              <PreviewPane
-                rawContent={rawContent}
-                templateId={templateId}
-                onTemplateChange={handleTemplateChange}
-                onContentChange={handleContentChange}
-                onTextDoubleClick={handlePreviewDoubleClick}
-                onOpenTemplatePicker={() => setShowTemplatePicker(true)}
-              />
-            </div>
+            {!previewCollapsed && (
+              <div
+                ref={rightPaneRef}
+                className="flex-1 overflow-hidden"
+                style={{ width: `${100 - splitPct}%` }}
+              >
+                <PreviewPane
+                  rawContent={rawContent}
+                  templateId={templateId}
+                  onTemplateChange={handleTemplateChange}
+                  onContentChange={handleContentChange}
+                  onTextDoubleClick={handlePreviewDoubleClick}
+                  onOpenTemplatePicker={() => setShowTemplatePicker(true)}
+                />
+              </div>
+            )}
           </div>
         </div>
-      </div>
+      </main>
 
       {/* ⌘K command palette */}
       {showCmdK && (
@@ -615,6 +752,42 @@ export default function EditorClient({
         />
       )}
     </ErrorBoundary>
+  );
+}
+
+function PendingEditsBar({
+  count,
+  onAcceptAll,
+  onRejectAll,
+}: {
+  count: number;
+  onAcceptAll: () => void;
+  onRejectAll: () => void;
+}) {
+  if (count === 0) return null;
+  return (
+    <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-accent/5 border-t border-accent/20 flex-shrink-0">
+      <span className="text-xs text-muted">
+        <span className="text-accent font-medium">{count}</span> pending edit
+        {count !== 1 ? 's' : ''}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={onRejectAll}
+          className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-muted hover:text-text hover:bg-surface-2 transition-colors duration-150"
+        >
+          <XIcon size={11} weight="bold" />
+          Reject all
+        </button>
+        <button
+          onClick={onAcceptAll}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs bg-accent text-accent-text hover:opacity-90 transition-opacity duration-150"
+        >
+          <CheckIcon size={11} weight="bold" />
+          Accept all
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -674,7 +847,7 @@ function VariantRow({
             </button>
             <button
               onClick={() => setConfirmDelete(false)}
-              className="text-[10px] text-faint hover:text-muted transition-colors leading-none"
+              className="text-[10px] text-muted hover:text-text transition-colors leading-none"
             >
               ✕
             </button>
@@ -685,7 +858,7 @@ function VariantRow({
               e.stopPropagation();
               setConfirmDelete(true);
             }}
-            className="opacity-0 group-hover:opacity-100 text-faint hover:text-red-400 transition-all text-[11px] leading-none flex-shrink-0"
+            className="opacity-0 group-hover:opacity-100 text-muted hover:text-red-400 transition-all text-[11px] leading-none flex-shrink-0"
             title="Delete"
           >
             ✕
@@ -798,7 +971,7 @@ function VariantsRail({
             onClick={onClone}
             className="mt-1 mx-1.5 rounded-lg border border-dashed border-border py-2 text-center hover:border-accent/50 hover:bg-accent/5 transition-colors duration-150 group"
           >
-            <span className="text-[10px] text-faint group-hover:text-accent transition-colors">
+            <span className="text-[10px] text-muted group-hover:text-accent transition-colors">
               + clone
             </span>
           </button>

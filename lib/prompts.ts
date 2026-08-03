@@ -34,21 +34,59 @@ The user's resume is written in **resmarkup** — resmd's lightweight plain-text
 
 **Numbered steps** — when order matters (e.g. a sequence of edits to make, a job search plan).
 
-**Table** — when comparing options side by side (e.g. resume vs. job description requirements, before/after rewrites of multiple bullets).
+**Table** — when comparing options side by side (e.g. resume vs. job description requirements).
 
-**Edit blocks** — ONLY when proposing specific wording changes to the resume text. Copy the SEARCH text character-for-character from the resume.
+---
+
+**Edit blocks** — when proposing specific wording changes to the resume. This is the PRIMARY way to suggest changes.
+
+Each edit block is rendered as an **inline before/after diff card** directly in the editor. The user clicks ✓ or ✕ on each one. The user sees the exact before/after diff in the editor — you do NOT need to describe what changed in prose. **You must emit the actual structured blocks — describing what you would change is not enough and produces no UI.**
+
+**After emitting edit blocks — keep prose minimal:**
+- Do NOT list what each edit does. The diff card shows it.
+- Do NOT write "Here are the suggested changes:", "Here are my edits:", or similar intros.
+- Do NOT summarize the edits at the end.
+- Prose (if any) should only be: a one-sentence framing *before* the blocks (e.g. "Three bullets need tightening:"), a follow-up question, or a caveat about something you couldn't edit (e.g. a metric you'd need from the user).
+- If the edits speak for themselves, send no prose at all.
+
+Rules:
+- One bullet, one sentence, or one field per block — keep each change small and focused
+- Never replace entire sections or multi-paragraph spans in a single block
+- Prefer 3–6 focused blocks over one large replacement
+- The SEARCH text must be **copied verbatim from the resume** — every character, space, dash, and punctuation mark must match. Include the leading \`- \` on bullet lines. Do not paraphrase or summarize.
+- If you are not certain a string appears verbatim in the resume, do not emit a block for it.
+
+Format — you must use these exact delimiters:
 
 \`\`\`
 <<<SEARCH>>>
-exact text from the resume to replace
+- exact bullet or line copied from the resume
 <<<REPLACE>>>
-improved replacement text
+- improved version of that bullet or line
 <<<END>>>
 \`\`\`
 
-You may chain multiple edit blocks. Follow them with a brief explanation of the key changes.
+Example of multiple chained blocks followed by explanation:
 
-**Full resume rewrite** — when rewriting, translating, or restructuring the ENTIRE resume, wrap the complete output in a resume block (not edit blocks):
+\`\`\`
+<<<SEARCH>>>
+- Built a navigation stack for iRobot Create 2 using ROS 2, implementing Dijkstra and BFS-based path planning with vision-based localization.
+<<<REPLACE>>>
+- Built a ROS 2 navigation stack on iRobot Create 2 with Dijkstra/BFS path planning and vision-based localization.
+<<<END>>>
+\`\`\`
+
+\`\`\`
+<<<SEARCH>>>
+- Designed an ultra-low-cost PicoPV lighting system for rural deployment.
+<<<REPLACE>>>
+- Designed an ultra-low-cost PicoPV off-grid lighting system for rural deployment.
+<<<END>>>
+\`\`\`
+
+---
+
+**Full resume rewrite** — ONLY for translations, complete structural overhauls, or when the user explicitly asks to rewrite the whole resume. This renders as a separate "Replace resume" card in chat — it is **not** shown inline in the editor.
 
 \`\`\`
 <<<RESUME>>>
@@ -56,16 +94,16 @@ full rewritten resume in resmarkup format
 <<<END>>>
 \`\`\`
 
-Follow with a brief note on what changed.
+Follow with a brief note on what changed. Do not use this for targeted improvements — use edit blocks instead.
 
 ---
 
 ## When NOT to use edit blocks
-- Rating, scoring, or overall evaluation → use the evaluation format below
+- Rating, scoring, or overall evaluation → evaluation format below
 - Explaining strengths/weaknesses → prose or bullets
 - General career/job advice → prose
 - Comparing resume to a job description → table
-- Full rewrites or translations → use the full resume block instead
+- Full rewrites or translations → full resume block only
 
 ---
 
@@ -82,8 +120,9 @@ When asked to rate or evaluate fit for a role, program, or company:
 When the user pastes a job description or asks to tailor the resume:
 - Identify keywords and requirements from the JD
 - Map them to existing resume content (what already matches, what's missing)
-- Suggest targeted edits using edit blocks for the highest-impact changes
-- Use a table if comparing multiple requirements at once
+- Produce focused edit blocks for the highest-impact changes — one bullet or field at a time
+- Use a table first if comparing multiple requirements, then follow with edit blocks for the top 3–5 changes
+- Never rewrite the entire resume via a full resume block just because of a JD — use targeted edits
 
 ---
 
@@ -112,7 +151,9 @@ export interface ParsedReply {
 }
 
 const BLOCK_RE = /<<<SEARCH>>>([\s\S]*?)<<<REPLACE>>>([\s\S]*?)<<<END>>>/g;
-const RESUME_RE = /<<<RESUME>>>([\s\S]*?)<<<END>>>/;
+// Greedy match so nested <<<END>>> markers (from edit blocks inside a RESUME
+// block) don't truncate the captured content — we want the last <<<END>>>.
+const RESUME_RE = /<<<RESUME>>>([\s\S]*)<<<END>>>/;
 
 /**
  * Splits an AI reply into conversational prose, structured edit blocks,
@@ -126,7 +167,10 @@ export function parseSuggestion(reply: string): ParsedReply {
   // Full resume rewrite block takes precedence over edit blocks
   const resumeMatch = RESUME_RE.exec(clean);
   if (resumeMatch) {
-    const fullResume = resumeMatch[1].trim();
+    // Strip any stray delimiters that leaked in (e.g. nested edit blocks)
+    const fullResume = resumeMatch[1]
+      .replace(/<<<(?:SEARCH|REPLACE|RESUME|END)>>>/g, '')
+      .trim();
     const prose = clean
       .replace(RESUME_RE, '')
       .replace(/<<<(?:RESUME|END)>>>/g, '')

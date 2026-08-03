@@ -3,7 +3,11 @@ import { getDbProvider } from '@/lib/db/server';
 import { getAuthUser } from '@/lib/getAuthUser';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { buildSystemPrompt, AI_MAX_TOKENS } from '@/lib/prompts';
-import { getProviderForModel } from '@/lib/ai-providers';
+import {
+  getProviderForModel,
+  resolveUserProvider,
+  AnthropicCompatibleProvider,
+} from '@/lib/ai-providers';
 import { debug } from '@/lib/env';
 
 export async function POST(req: NextRequest) {
@@ -27,16 +31,35 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { message, resumeContent, history, model } = await req.json();
+    const {
+      message,
+      resumeContent,
+      history,
+      model,
+      providerId,
+      fileContext,
+      fileName,
+    } = await req.json();
 
     let provider;
-    try {
-      provider = getProviderForModel(model ?? '');
-    } catch {
-      return NextResponse.json(
-        { error: 'AI service not configured' },
-        { status: 503 }
-      );
+    if (providerId && providerId !== 'server') {
+      try {
+        provider = await resolveUserProvider(user.id, providerId);
+      } catch {
+        return NextResponse.json(
+          { error: 'Provider not found or key invalid' },
+          { status: 404 }
+        );
+      }
+    } else {
+      try {
+        provider = getProviderForModel(model ?? '');
+      } catch {
+        return NextResponse.json(
+          { error: 'AI service not configured' },
+          { status: 503 }
+        );
+      }
     }
 
     if (!resumeContent || !resumeContent.trim()) {
@@ -61,9 +84,24 @@ export async function POST(req: NextRequest) {
       ...(history ?? []).map(
         ({ role, content }: { role: string; content: string }) => ({
           role: role as 'user' | 'assistant' | 'system',
-          content,
+          // Both Anthropic and OpenAI reject empty-string content. This happens
+          // when an assistant turn produced only edit blocks with no prose.
+          content: content || '✦',
         })
       ),
+      ...(fileContext
+        ? [
+            {
+              role: 'user' as const,
+              content: `Here is additional context from the attached file "${fileName ?? 'attachment'}":\n\n${fileContext}`,
+            },
+            {
+              role: 'assistant' as const,
+              content:
+                "Got it — I've read the attached file. What would you like me to do with it?",
+            },
+          ]
+        : []),
       { role: 'user' as const, content: message },
     ];
 
@@ -82,7 +120,10 @@ export async function POST(req: NextRequest) {
     }
 
     const data = await response.json();
-    const reply: string = data.choices?.[0]?.message?.content ?? '';
+    const reply: string =
+      provider instanceof AnthropicCompatibleProvider
+        ? (data.content?.[0]?.text ?? '')
+        : (data.choices?.[0]?.message?.content ?? '');
 
     // Track model usage — fire and forget, never block the response
     getDbProvider().incrementModelUse(modelUsed, provider.name);

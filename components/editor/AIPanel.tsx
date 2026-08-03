@@ -2,17 +2,18 @@
 
 import { XIcon } from '@phosphor-icons/react';
 import AIChat from '@/components/editor/AIChat';
+import type { Edit } from '@/lib/prompts';
 
 interface AIPanelProps {
   rawContent: string;
   onClose: () => void;
-  onApplyEdit?: (search: string, replace: string) => void;
+  onEditsReceived?: (edits: Edit[], model?: string) => void;
 }
 
 export default function AIPanel({
   rawContent,
   onClose,
-  onApplyEdit,
+  onEditsReceived,
 }: AIPanelProps) {
   return (
     <div
@@ -41,7 +42,7 @@ export default function AIPanel({
 
       {/* Chat area fills remaining height */}
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        <AIChat resumeContent={rawContent} onApplyEdit={onApplyEdit} />
+        <AIChat resumeContent={rawContent} onEditsReceived={onEditsReceived} />
       </div>
     </div>
   );

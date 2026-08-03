@@ -13,7 +13,7 @@ const Editor = dynamic(() => import('@/components/editor/Editor'), {
 });
 
 const MIN_PANE_PX = 300;
-const DEFAULT_SPLIT = 50;
+const DEFAULT_SPLIT = 60;
 
 type MobileTab = 'write' | 'preview';
 
@@ -89,7 +89,7 @@ export default function EditorPage() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-bg">
+    <main className="flex flex-col h-screen overflow-hidden bg-bg">
       <Toolbar lastSaved={null} />
 
       {/* Mobile tab bar (<md) */}
@@ -182,6 +182,6 @@ export default function EditorPage() {
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

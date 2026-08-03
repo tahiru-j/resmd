@@ -22,6 +22,45 @@ function getExtension(filename: string): string {
   return parts.length > 1 ? '.' + parts[parts.length - 1].toLowerCase() : '';
 }
 
+const RESMD_SECTION_KW = new Set([
+  'bio',
+  'experience',
+  'employment',
+  'work',
+  'education',
+  'skills',
+  'projects',
+  'summary',
+  'objective',
+  'about',
+  'contact',
+  'certifications',
+  'certificates',
+  'languages',
+  'awards',
+  'volunteer',
+  'publications',
+  'references',
+]);
+
+function isResmdNative(text: string): boolean {
+  const lines = text.split(/\r?\n/);
+  // Resmd entry format: ## Title @ Org | Date
+  const hasEntryFormat = lines.some((l) => /^## .+\|/.test(l.trim()));
+  // Bio field format: Name: / Email: / Phone: / URL:
+  const hasBioFields = lines.some((l) =>
+    /^(Name|Email|Phone|URL):\s/.test(l.trim())
+  );
+  // Section headings matching known resume sections
+  const sectionCount = lines.filter((l) => {
+    const m = l.trim().match(/^# (.+)$/);
+    return m ? RESMD_SECTION_KW.has(m[1].toLowerCase()) : false;
+  }).length;
+  return (
+    hasEntryFormat || (hasBioFields && sectionCount >= 1) || sectionCount >= 2
+  );
+}
+
 export async function POST(req: NextRequest) {
   try {
     const user = await getAuthUser(req);
@@ -69,6 +108,11 @@ export async function POST(req: NextRequest) {
         },
         { status: 400 }
       );
+    }
+
+    // If the file is already in resmd format, skip AI conversion entirely
+    if (extension === '.md' && isResmdNative(rawContent)) {
+      return NextResponse.json({ rawContent, detectedFields: {} });
     }
 
     let finalContent: string;

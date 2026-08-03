@@ -162,8 +162,10 @@ export function parseResume(raw: string): ParsedResume {
     }
 
     // 5. KeyValueItems (Key: Value)
+    // Key must not contain ". " (sentence boundary) — prevents long prose lines
+    // like "...cloud monitoring layer. Metric: >50%..." from being misidentified.
     const keyValueMatch = line.match(/^([A-Za-z][^:]+):\s*(.+)/);
-    if (keyValueMatch) {
+    if (keyValueMatch && !keyValueMatch[1].includes('. ')) {
       ensureSection();
       pushItem({
         kind: 'keyvalue',
