@@ -1,4 +1,6 @@
 import mammoth from 'mammoth';
+import { resolve } from 'path';
+import { pathToFileURL } from 'url';
 
 const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md'];
 
@@ -21,12 +23,27 @@ export async function extractText(
     }
 
     if (ext === '.pdf') {
-      const pdfParse = (await import('pdf-parse')).default as (
-        buffer: Buffer,
-        options?: Record<string, unknown>
-      ) => Promise<{ text: string }>;
-      const data = await pdfParse(Buffer.from(buffer));
-      return data.text || '';
+      const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+      pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
+        resolve(
+          process.cwd(),
+          'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'
+        )
+      ).href;
+      const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer) })
+        .promise;
+      const pages = await Promise.all(
+        Array.from({ length: doc.numPages }, (_, i) =>
+          doc.getPage(i + 1).then((p) => p.getTextContent())
+        )
+      );
+      return pages
+        .flatMap((c) =>
+          c.items
+            .filter((item) => 'str' in item)
+            .map((item) => (item as { str: string }).str)
+        )
+        .join(' ');
     }
 
     return new TextDecoder('utf-8').decode(buffer);

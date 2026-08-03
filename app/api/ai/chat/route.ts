@@ -31,8 +31,15 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { message, resumeContent, history, model, providerId } =
-      await req.json();
+    const {
+      message,
+      resumeContent,
+      history,
+      model,
+      providerId,
+      fileContext,
+      fileName,
+    } = await req.json();
 
     let provider;
     if (providerId && providerId !== 'server') {
@@ -82,6 +89,19 @@ export async function POST(req: NextRequest) {
           content: content || '✦',
         })
       ),
+      ...(fileContext
+        ? [
+            {
+              role: 'user' as const,
+              content: `Here is additional context from the attached file "${fileName ?? 'attachment'}":\n\n${fileContext}`,
+            },
+            {
+              role: 'assistant' as const,
+              content:
+                "Got it — I've read the attached file. What would you like me to do with it?",
+            },
+          ]
+        : []),
       { role: 'user' as const, content: message },
     ];
 

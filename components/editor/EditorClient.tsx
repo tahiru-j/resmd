@@ -8,7 +8,9 @@ import {
   ArrowRightIcon,
   CaretLeftIcon,
   CaretRightIcon,
+  CheckIcon,
   GitBranchIcon,
+  XIcon,
 } from '@phosphor-icons/react';
 import Toolbar from '@/components/editor/Toolbar';
 import PreviewPane from '@/components/preview/PreviewPane';
@@ -284,6 +286,37 @@ export default function EditorClient({
     });
   }, []);
 
+  const handleAcceptAllEdits = useCallback(() => {
+    const pending = pendingEdits.filter((e) => e.status === 'pending');
+    if (pending.length === 0) return;
+    setRawContent((prev) => {
+      let result = prev;
+      for (const edit of pending) {
+        if (result.includes(edit.search))
+          result = result.replace(edit.search, edit.replace);
+      }
+      return result;
+    });
+    scheduleAutosave();
+    trackSuggestion('accepted', pending.length, pending[0]?.model);
+    setPendingEdits((prev) =>
+      prev.map((e) =>
+        e.status === 'pending' ? { ...e, status: 'applied' as const } : e
+      )
+    );
+  }, [pendingEdits, scheduleAutosave]);
+
+  const handleRejectAllEdits = useCallback(() => {
+    const pending = pendingEdits.filter((e) => e.status === 'pending');
+    if (pending.length === 0) return;
+    trackSuggestion('rejected', pending.length, pending[0]?.model);
+    setPendingEdits((prev) =>
+      prev.map((e) =>
+        e.status === 'pending' ? { ...e, status: 'dismissed' as const } : e
+      )
+    );
+  }, [pendingEdits]);
+
   const handleReplaceResume = useCallback(
     (content: string) => {
       setRawContent(content);
@@ -543,6 +576,11 @@ export default function EditorClient({
                 />
               )}
             </div>
+            <PendingEditsBar
+              count={pendingEdits.filter((e) => e.status === 'pending').length}
+              onAcceptAll={handleAcceptAllEdits}
+              onRejectAll={handleRejectAllEdits}
+            />
             <AIChat
               resumeContent={rawContent}
               onEditsReceived={handleEditsReceived}
@@ -603,6 +641,13 @@ export default function EditorClient({
                   />
                 )}
               </div>
+              <PendingEditsBar
+                count={
+                  pendingEdits.filter((e) => e.status === 'pending').length
+                }
+                onAcceptAll={handleAcceptAllEdits}
+                onRejectAll={handleRejectAllEdits}
+              />
               <AIChat
                 resumeContent={rawContent}
                 onEditsReceived={handleEditsReceived}
@@ -707,6 +752,42 @@ export default function EditorClient({
         />
       )}
     </ErrorBoundary>
+  );
+}
+
+function PendingEditsBar({
+  count,
+  onAcceptAll,
+  onRejectAll,
+}: {
+  count: number;
+  onAcceptAll: () => void;
+  onRejectAll: () => void;
+}) {
+  if (count === 0) return null;
+  return (
+    <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-accent/5 border-t border-accent/20 flex-shrink-0">
+      <span className="text-xs text-muted">
+        <span className="text-accent font-medium">{count}</span> pending edit
+        {count !== 1 ? 's' : ''}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={onRejectAll}
+          className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-muted hover:text-text hover:bg-surface-2 transition-colors duration-150"
+        >
+          <XIcon size={11} weight="bold" />
+          Reject all
+        </button>
+        <button
+          onClick={onAcceptAll}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs bg-accent text-accent-text hover:opacity-90 transition-opacity duration-150"
+        >
+          <CheckIcon size={11} weight="bold" />
+          Accept all
+        </button>
+      </div>
+    </div>
   );
 }
 
