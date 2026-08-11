@@ -1,4 +1,4 @@
 export const LIMITS = {
-  MAX_VARIANTS: 10,
+  MAX_VARIANTS: 50,
   GUEST_VARIANTS: 1,
 } as const;
